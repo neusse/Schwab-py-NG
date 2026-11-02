@@ -5,7 +5,34 @@ Contributing to ``schwab``
 Fixing a bug? Adding a feature? Cleaning something up for the sake of cleaning
 it up? All welcome, and no improvement is too small.
 
-Branch from ``main``, one concern per branch. `RELEASING.md
+------------------
+Ways to contribute
+------------------
+
+- **Questions, bug reports, and feature proposals:** open a `GitHub issue
+  <https://github.com/neusse/Schwab-py-NG/issues>`__. Search the open and closed
+  issues first so useful history stays together.
+- **Small fixes and documentation:** a pull request is welcome directly.
+- **New public APIs or substantial behavior changes:** open an issue first.
+  Agreeing on the observable behavior before implementation avoids asking a
+  contributor to discard a large patch whose direction does not fit.
+- **Security problems:** use `private vulnerability reporting
+  <https://github.com/neusse/Schwab-py-NG/security/advisories/new>`__, not a
+  public issue. Never post a token file, API key, app secret, account number,
+  account hash, or log you have not checked for those values.
+
+Fork the repository, branch from ``main``, and keep one concern per branch and
+pull request. Maintainers merge changes after the required CI checks pass and
+the review conversation is resolved. This is currently a small project, so no
+outside approval is required, but a pull request may be asked to change before
+merge.
+
+No contributor license agreement or copyright assignment is required. By
+submitting a contribution, you agree that it is your work—or that you have the
+right to submit it—and that it is licensed under this repository's `MIT license
+<https://github.com/neusse/Schwab-py-NG/blob/main/LICENSE>`__.
+
+`RELEASING.md
 <https://github.com/neusse/Schwab-py-NG/blob/main/RELEASING.md>`__ collects the
 rules this project has learned by getting them wrong, and is worth ten minutes
 before a first patch.

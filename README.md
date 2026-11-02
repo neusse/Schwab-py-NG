@@ -13,7 +13,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-14b8a6.svg)](#support-matrix)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Documentation](https://neusse.github.io/Schwab-py-NG/) · [Changes](CHANGELOG.md) · [Integration notes](INTEGRATION.md) · [Install](#installing) · [Quick start](#sixty-seconds-in) · [Contributing](docs/contributing.rst)
+[Documentation](https://neusse.github.io/Schwab-py-NG/) · [Changes](CHANGELOG.md) · [Integration notes](INTEGRATION.md) · [Install](#installing) · [Quick start](#sixty-seconds-in) · [Contributing](https://neusse.github.io/Schwab-py-NG/contributing.html)
 
 </div>
 
@@ -316,9 +316,20 @@ and the exact upstream revisions reviewed.
 
 ## Getting help and contributing
 
-Bug reports, questions, suggestions and patches all go to the repository: open an
-[issue](https://github.com/neusse/Schwab-py-NG/issues) or a [pull
-request](https://github.com/neusse/Schwab-py-NG/pulls).
+Contributions are welcome under the project's MIT license—no contributor
+agreement is required. Use an
+[issue](https://github.com/neusse/Schwab-py-NG/issues) for bugs, questions, and
+feature proposals. Open an issue before a large API or behavior change so the
+design can be agreed before substantial work begins. Never post credentials,
+token files, account identifiers, or unreviewed logs; report security problems
+[privately](https://github.com/neusse/Schwab-py-NG/security/advisories/new).
+
+Code changes come through a fork or branch and a [pull
+request](https://github.com/neusse/Schwab-py-NG/pulls). Keep one concern per
+pull request, add a regression test that fails without the change, update the
+user documentation when behavior changes, and let the Linux/Windows CI matrix
+finish before merge. The complete setup and review expectations are in the
+**[contribution guide](https://neusse.github.io/Schwab-py-NG/contributing.html)**.
 
 ## Where this came from
 
