@@ -9,6 +9,7 @@ from enum import Enum
 
 import contextlib
 import datetime
+import httpx2
 import inspect
 import json
 import os
@@ -1307,6 +1308,142 @@ class BaseClient(EnumEnforcer):
                 end_datetime=end_datetime,
                 need_extended_hours_data=need_extended_hours_data, 
                 need_previous_close=need_previous_close)
+
+
+    @staticmethod
+    def _aggregate_price_history_every_hour(response):
+        '''Build hourly candles from a successful thirty-minute response.'''
+        # Preserve the normal client contract for refusals and rate limits:
+        # callers still receive Schwab's original response and decide how to
+        # handle its status and body.
+        if not response.is_success:
+            return response
+
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError(
+                    'price history response must be a JSON object')
+        candles = payload.get('candles')
+        if not isinstance(candles, list):
+            raise ValueError(
+                    'price history response must contain a candles list')
+
+        half_hour_millis = 30 * 60 * 1000
+        hourly = []
+        pending = None
+        for index, candle in enumerate(candles):
+            if not isinstance(candle, dict):
+                raise ValueError(
+                        'price history candle {} must be a JSON object'.format(
+                            index))
+            try:
+                candle_datetime = candle['datetime']
+            except KeyError as exc:
+                raise ValueError(
+                        'price history candle {} has no datetime'.format(
+                            index)) from exc
+
+            if pending is None:
+                pending = candle
+                continue
+
+            try:
+                consecutive = (candle_datetime - pending['datetime']
+                               == half_hour_millis)
+            except (KeyError, TypeError) as exc:
+                raise ValueError(
+                        'price history candle datetimes must be epoch '
+                        'milliseconds') from exc
+
+            if not consecutive:
+                # Never bridge a missing interval, an overnight close, or an
+                # out-of-order candle and call the result one hour.
+                pending = candle
+                continue
+
+            try:
+                combined = dict(pending)
+                combined.update({
+                    'open': pending['open'],
+                    'high': max(pending['high'], candle['high']),
+                    'low': min(pending['low'], candle['low']),
+                    'close': candle['close'],
+                    'volume': pending['volume'] + candle['volume'],
+                    'datetime': pending['datetime'],
+                })
+            except (KeyError, TypeError) as exc:
+                raise ValueError(
+                        'price history candles must contain numeric open, '
+                        'high, low, close, volume, and datetime fields') from exc
+
+            hourly.append(combined)
+            pending = None
+
+        aggregated_payload = dict(payload)
+        aggregated_payload['candles'] = hourly
+
+        # This is still an httpx2 response: status, headers, request metadata,
+        # extensions and history survive. Entity headers must be regenerated
+        # for the new JSON body rather than copied from Schwab's response.
+        headers = response.headers.copy()
+        for name in ('content-length', 'content-encoding', 'transfer-encoding'):
+            headers.pop(name, None)
+        response_args = {
+            'headers': headers,
+            'json': aggregated_payload,
+            'extensions': dict(response.extensions),
+            'history': list(response.history),
+        }
+        try:
+            response_args['request'] = response.request
+        except RuntimeError:
+            # A custom/test response may not have been attached to a request.
+            pass
+
+        return httpx2.Response(response.status_code, **response_args)
+
+
+    def get_price_history_every_hour(
+            self, symbol, *, start_datetime=None, end_datetime=None,
+            need_extended_hours_data=None, need_previous_close=None):
+        '''Fetch hourly price history for a stock or ETF.
+
+        Schwab does not offer native hourly candles. This method requests
+        thirty-minute candles and combines each consecutive pair into an hour:
+        the first open and timestamp, the highest high, the lowest low, the
+        second close, and the sum of both volumes.
+
+        The return value remains an ``httpx2.Response`` with Schwab's status,
+        headers, request metadata, and top-level JSON fields. On a successful
+        response, ``response.json()['candles']`` contains the hourly candles.
+        An error response is returned unchanged. With :class:`AsyncClient`,
+        await this method as usual.
+
+        Only pairs exactly thirty minutes apart are combined. A candle beside
+        a gap and a final candle without a partner are omitted rather than
+        presented as a full hour. The newest source candle can still be
+        forming; callers using the latest bar should check its timestamp.
+
+        With ``need_extended_hours_data=False``, regular-session data naturally
+        pairs from the 09:30 US Eastern open (09:30 + 10:00, then 10:30 +
+        11:00, and so on). With extended-hours data, pairs are anchored to the
+        first candle Schwab returns after each gap.
+        '''
+        response = self.get_price_history_every_thirty_minutes(
+                symbol,
+                start_datetime=start_datetime,
+                end_datetime=end_datetime,
+                need_extended_hours_data=need_extended_hours_data,
+                need_previous_close=need_previous_close)
+
+        if inspect.isawaitable(response):
+            async def await_and_aggregate():
+                awaited_response = await response
+                return self._aggregate_price_history_every_hour(
+                        awaited_response)
+            return await_and_aggregate()
+
+        return self._aggregate_price_history_every_hour(response)
 
 
     def get_price_history_every_day(

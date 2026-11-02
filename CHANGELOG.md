@@ -31,6 +31,28 @@ was measured, and every number, is unchanged.
 
 ---
 
+## Unreleased
+
+### Hourly price-history candles without hand-written resampling
+
+``Client.get_price_history_every_hour`` and its ``AsyncClient`` counterpart
+request Schwab's thirty-minute candles and combine consecutive pairs into
+hourly OHLCV candles. The method keeps the usual ``httpx2.Response`` interface
+and preserves Schwab's status, headers, request metadata, and top-level JSON
+fields. Error responses are returned unchanged.
+
+Each hour uses the first open and timestamp, the highest high, the lowest low,
+the second close, and the sum of both volumes. Pairs must be exactly thirty
+minutes apart. Candles beside a gap and a final unpaired candle are omitted
+rather than represented as a complete hour. Regular-session data aligns from
+09:30 US Eastern when ``need_extended_hours_data=False``; extended-hours pairs
+begin with the first candle Schwab returns after each gap.
+
+The newest underlying candle may still be forming. A two-candle result is a
+complete pair, not proof that its final thirty minutes have closed.
+
+---
+
 ## 5.2.0
 
 *2026-10-24*

@@ -20,7 +20,7 @@ from schwab.client import AsyncClient, Client
 from schwab.orders.generic import OrderBuilder
 from schwab.utils import TokenRefreshError
 
-from .utils import AsyncMagicMock, ResyncProxy, no_duplicates
+from .utils import AsyncMagicMock, MockResponse, ResyncProxy, no_duplicates
 
 # Constants
 
@@ -1118,9 +1118,10 @@ class _TestClient:
 
     @patch('schwab.client.base.datetime.datetime', mockdatetime)
     def test_price_history_helpers_omit_period_when_given_a_range(self):
+        self.mock_session.get.return_value = MockResponse({'candles': []}, 200)
         helpers = [name for name in dir(self.client)
                    if name.startswith('get_price_history_every')]
-        self.assertEqual(7, len(helpers))
+        self.assertEqual(8, len(helpers))
 
         for name in helpers:
             for kwargs in ({'start_datetime': EARLIER_DATETIME},
@@ -1142,6 +1143,7 @@ class _TestClient:
     def test_price_history_helpers_keep_period_without_a_range(self):
         # With no range asked for, the synthesized one spans decades and is not
         # something to request. period is what should describe the request.
+        self.mock_session.get.return_value = MockResponse({'candles': []}, 200)
         helpers = [name for name in dir(self.client)
                    if name.startswith('get_price_history_every')]
 
@@ -1846,6 +1848,121 @@ class _TestClient:
         self.mock_session.get.assert_called_once_with(
             self.make_url('/marketdata/v1/pricehistory'),
             params=params)
+
+
+    # get_price_history_every_hour
+
+
+    @staticmethod
+    def _candle(datetime_millis, open_, high, low, close, volume):
+        return {
+                'open': open_,
+                'high': high,
+                'low': low,
+                'close': close,
+                'volume': volume,
+                'datetime': datetime_millis,
+        }
+
+    @patch('schwab.client.base.datetime.datetime', mockdatetime)
+    def test_get_price_history_every_hour_aggregates_consecutive_pairs(self):
+        half_hour = 30 * 60 * 1000
+        start = 1700000000000
+        source_payload = {
+                'symbol': 'AAPL',
+                'empty': False,
+                'previousClose': 187.25,
+                'previousCloseDate': start - 24 * 60 * 60 * 1000,
+                'candles': [
+                    self._candle(start, 100, 104, 99, 103, 10),
+                    self._candle(start + half_hour, 103, 108, 102, 107, 20),
+                    self._candle(start + 2 * half_hour, 107, 109, 105, 106, 30),
+                    self._candle(start + 3 * half_hour, 106, 110, 101, 102, 40),
+                ],
+        }
+        request = httpx2.Request('GET', self.make_url(
+            '/marketdata/v1/pricehistory'))
+        source_response = httpx2.Response(
+                200, json=source_payload, request=request,
+                headers={'x-schwab-request-id': 'request-id'})
+        self.mock_session.get.return_value = source_response
+
+        response = self.client.get_price_history_every_hour('AAPL')
+
+        self.assertIsNot(response, source_response)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('request-id', response.headers['x-schwab-request-id'])
+        self.assertEqual(request, response.request)
+        self.assertEqual({
+                'symbol': 'AAPL',
+                'empty': False,
+                'previousClose': 187.25,
+                'previousCloseDate': start - 24 * 60 * 60 * 1000,
+                'candles': [
+                    self._candle(start, 100, 108, 99, 107, 30),
+                    self._candle(
+                        start + 2 * half_hour, 107, 110, 101, 102, 70),
+                ],
+        }, response.json())
+        # Aggregation never edits the response returned by the session.
+        self.assertEqual(source_payload, source_response.json())
+
+        params = self.mock_session.get.call_args.kwargs['params']
+        self.assertEqual('minute', params['frequencyType'])
+        self.assertEqual(30, params['frequency'])
+
+    @patch('schwab.client.base.datetime.datetime', mockdatetime)
+    def test_get_price_history_every_hour_drops_gaps_and_unpaired_candles(self):
+        half_hour = 30 * 60 * 1000
+        start = 1700000000000
+        self.mock_session.get.return_value = httpx2.Response(200, json={
+            'symbol': 'AAPL',
+            'candles': [
+                self._candle(start, 10, 12, 9, 11, 1),
+                self._candle(start + half_hour, 11, 13, 10, 12, 2),
+                # This candle has no consecutive partner and is omitted.
+                self._candle(start + 2 * half_hour, 12, 14, 11, 13, 3),
+                # A gap starts a new candidate pair.
+                self._candle(start + 5 * half_hour, 20, 22, 19, 21, 4),
+                self._candle(start + 6 * half_hour, 21, 23, 20, 22, 5),
+                # A final half hour is not a complete hourly candle.
+                self._candle(start + 7 * half_hour, 22, 24, 21, 23, 6),
+            ],
+        })
+
+        candles = self.client.get_price_history_every_hour('AAPL').json()[
+                'candles']
+
+        self.assertEqual([
+            self._candle(start, 10, 13, 9, 12, 3),
+            self._candle(start + 5 * half_hour, 20, 23, 19, 22, 9),
+        ], candles)
+
+    @patch('schwab.client.base.datetime.datetime', mockdatetime)
+    def test_get_price_history_every_hour_forwards_options(self):
+        self.mock_session.get.return_value = MockResponse({'candles': []}, 200)
+
+        self.client.get_price_history_every_hour(
+                'AAPL', start_datetime=EARLIER_DATETIME,
+                end_datetime=NOW_DATETIME, need_extended_hours_data=True,
+                need_previous_close=True)
+
+        params = self.mock_session.get.call_args.kwargs['params']
+        self.assertNotIn('period', params)
+        self.assertEqual(EARLIER_MILLIS, params['startDate'])
+        self.assertEqual(int(NOW_DATETIME.timestamp()) * 1000,
+                         params['endDate'])
+        self.assertIs(True, params['needExtendedHoursData'])
+        self.assertIs(True, params['needPreviousClose'])
+
+    @patch('schwab.client.base.datetime.datetime', mockdatetime)
+    def test_get_price_history_every_hour_preserves_error_response(self):
+        source_response = httpx2.Response(429, json={'error': 'rate limited'})
+        self.mock_session.get.return_value = source_response
+
+        response = self.client.get_price_history_every_hour('AAPL')
+
+        self.assertIs(source_response, response)
 
 
     # get_price_history_every_day
@@ -3170,6 +3287,36 @@ class ClientTest(_TestClient, unittest.TestCase):
         # its connections until it happened to be collected.
         self.client.close_session()
         self.mock_session.close.assert_called_once_with()
+
+
+class AsyncHourlyPriceHistoryTest(unittest.TestCase):
+    '''The real AsyncClient path, without the suite's resynchronizing proxy.'''
+
+    @no_duplicates
+    def test_the_hourly_helper_is_awaitable(self):
+        async def run():
+            session = AsyncMagicMock()
+            session.get.return_value = httpx2.Response(200, json={
+                'symbol': 'AAPL',
+                'candles': [
+                    {
+                        'open': 10, 'high': 12, 'low': 9, 'close': 11,
+                        'volume': 1, 'datetime': 1700000000000,
+                    },
+                    {
+                        'open': 11, 'high': 13, 'low': 10, 'close': 12,
+                        'volume': 2, 'datetime': 1700001800000,
+                    },
+                ],
+            })
+            client = AsyncClient(API_KEY, session)
+
+            response = await client.get_price_history_every_hour('AAPL')
+
+            self.assertEqual(1, len(response.json()['candles']))
+            self.assertEqual(12, response.json()['candles'][0]['close'])
+
+        asyncio.run(run())
 
 class AsyncClientTest(_TestClient, unittest.TestCase):
     """

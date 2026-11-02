@@ -253,7 +253,7 @@ registering an app with Schwab and getting your first token.
 | | |
 |---|---|
 | **Authentication** | Browser login, a manual flow for headless boxes and notebooks, a two-step flow for web backends, and token refresh handled for you |
-| **Market data** | Quotes, fundamentals, option chains, price history at seven granularities, movers, market hours, instrument lookup |
+| **Market data** | Quotes, fundamentals, option chains, price history from one-minute through weekly bars—including locally aggregated hourly candles—movers, market hours, instrument lookup |
 | **Streaming** | Fourteen real-time services over one websocket: level one equities, options, futures and forex, order book depth from Nasdaq and NYSE, chart and screener feeds, news headlines, and your own account activity |
 | **Orders** | Construction, placement, replacement, cancellation and preview, with templates for the common equity orders and option strategies |
 | **Accounts** | Balances, positions, orders and transaction history |

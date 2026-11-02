@@ -311,10 +311,40 @@ single endpoint :meth:`Client.get_price_history` that accepts a complex variety
 of inputs, but fails to document them in any meaningful way.
 
 Thankfully, we've reverse engineered this endpoint and built some helpful
-utilities for fetching prices by minute, day, week, etc. Each method can be
-called with or without date bounds. When called without date bounds, it returns
-all data available. Each method offers a different lookback period, so make sure
-to read the documentation below to learn how much data is available.
+utilities for fetching prices by minute, hour, day, week, etc. Each method can
+be called with or without date bounds. When called without date bounds, it
+returns all data available. Each method offers a different lookback period, so
+make sure to read the documentation below to learn how much data is available.
+
+.. rubric:: Hourly candles
+
+Schwab's endpoint stops at thirty-minute intraday candles. NG adds
+:meth:`Client.get_price_history_every_hour`, which requests those candles and
+combines consecutive pairs locally while preserving the usual
+``httpx2.Response`` interface:
+
+.. code-block:: python
+
+   response = c.get_price_history_every_hour(
+           'AAPL', need_extended_hours_data=False)
+   response.raise_for_status()
+   hourly_candles = response.json()['candles']
+
+The result uses the first candle's ``open`` and ``datetime``, the larger
+``high``, the smaller ``low``, the second candle's ``close``, and the sum of
+both ``volume`` values. For regular-session data the pairs are 09:30 + 10:00,
+10:30 + 11:00, and so on, in US Eastern time.
+
+Only candles exactly thirty minutes apart are combined. A candle beside a gap
+and a final candle without a partner are omitted, because neither describes a
+full hour. With extended-hours data, pairs begin at the first candle Schwab
+returns after each gap. Set ``need_extended_hours_data=False`` when the regular
+09:30 open is the alignment you want.
+
+The newest thirty-minute source candle can still be forming, so the newest
+hourly result can also be incomplete in time even though it has two members.
+Check its timestamp before treating it as closed. ``AsyncClient`` provides the
+same method and response shape; await it normally.
 
 .. note::
 
@@ -358,6 +388,7 @@ to read the documentation below to learn how much data is available.
 .. automethod:: schwab.client.Client.get_price_history_every_ten_minutes
 .. automethod:: schwab.client.Client.get_price_history_every_fifteen_minutes
 .. automethod:: schwab.client.Client.get_price_history_every_thirty_minutes
+.. automethod:: schwab.client.Client.get_price_history_every_hour
 .. automethod:: schwab.client.Client.get_price_history_every_day
 .. automethod:: schwab.client.Client.get_price_history_every_week
 
