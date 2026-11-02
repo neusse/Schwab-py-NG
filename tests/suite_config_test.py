@@ -249,12 +249,14 @@ class PublishBuildsTheTagTest(unittest.TestCase):
         os.makedirs(os.path.join(empty, 'dist'))
         built = os.path.join(tmp.name, 'built')
         os.makedirs(os.path.join(built, 'dist'))
-        open(os.path.join(built, 'dist', 'schwab-5.3.0.tar.gz'), 'w').close()
+        open(os.path.join(
+            built, 'dist', 'schwab_py_ng-5.3.0.tar.gz'), 'w').close()
         # A version that reads as empty: only a tag that is not empty
         # tells it apart from no tag at all.
         unnamed = os.path.join(tmp.name, 'unnamed')
         os.makedirs(os.path.join(unnamed, 'dist'))
-        open(os.path.join(unnamed, 'dist', 'schwab-.tar.gz'), 'w').close()
+        open(os.path.join(
+            unnamed, 'dist', 'schwab_py_ng-.tar.gz'), 'w').close()
         for cwd, tag, refused in ((built, 'v5.3.0', False),
                                   (built, 'v5.2.0', True),
                                   (built, '', True),
