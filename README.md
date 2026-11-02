@@ -13,7 +13,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-14b8a6.svg)](#support-matrix)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Documentation](https://neusse.github.io/Schwab-py-NG/) · [Changes](CHANGELOG.md) · [Integration notes](INTEGRATION.md) · [Install](#installing) · [Quick start](#sixty-seconds-in) · [Contributing](https://neusse.github.io/Schwab-py-NG/contributing.html)
+[Documentation](https://neusse.github.io/Schwab-py-NG/) · [Compatibility](COMPATIBILITY_CHANGES.md) · [Changes](CHANGELOG.md) · [Integration notes](INTEGRATION.md) · [Install](#installing) · [Quick start](#sixty-seconds-in) · [Contributing](https://neusse.github.io/Schwab-py-NG/contributing.html)
 
 </div>
 
@@ -60,7 +60,12 @@ guide](https://neusse.github.io/Schwab-py-NG/getting-started.html), then use the
 [order-builder](https://neusse.github.io/Schwab-py-NG/order-builder.html)
 references as needed.
 
-For release-to-release behavior changes and compatibility notes, read the
+Migrating an existing program from the original `schwab-py`? Read
+**[Compatibility Changes](COMPATIBILITY_CHANGES.md)** before installing. It
+collects the API, dependency, streaming, order, authentication, and operational
+differences that may require changes in an existing program.
+
+For the complete release-to-release history, read the
 **[changelog](CHANGELOG.md)**. For the exact upstream repositories, revisions,
 and integration decisions behind NG, read **[INTEGRATION.md](INTEGRATION.md)**.
 
