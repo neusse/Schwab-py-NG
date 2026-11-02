@@ -280,6 +280,7 @@ class LinkTest(unittest.TestCase):
 
     ALLOWED_HOSTS = frozenset((
         'schwaby.readthedocs.io',          # historical changelog link
+        'neusse.github.io',                # published Schwab-py-NG docs
         'github.com',                       # ours, plus httpx2's changelog
         'img.shields.io',                   # README badges
         'api.schwabapi.com',                # the API itself

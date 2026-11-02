@@ -135,7 +135,7 @@ setuptools.setup(
     },
     keywords='finance trading equities bonds options research',
     project_urls={
-        'Documentation': 'https://github.com/neusse/Schwab-py-NG/tree/main/docs',
+        'Documentation': 'https://neusse.github.io/Schwab-py-NG/',
         'Source': 'https://github.com/neusse/Schwab-py-NG',
         'Tracker': 'https://github.com/neusse/Schwab-py-NG/issues',
         'Original Upstream': 'https://github.com/alexgolec/schwab-py',

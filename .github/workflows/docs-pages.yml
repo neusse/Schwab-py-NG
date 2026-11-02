@@ -1,0 +1,56 @@
+# Builds the Sphinx documentation and publishes it to GitHub Pages.
+name: documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Pinned Python 3.12
+        id: pin
+        shell: bash
+        run: |
+          version=$(tr -d '\r' < .python-versions | grep -E '^3\.12\.[0-9]+$') || {
+            echo "no Python 3.12 pin in .python-versions"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          version: "0.13.4"
+          python-version: ${{ steps.pin.outputs.version }}
+          activate-environment: true
+      - name: Install documentation dependencies
+        run: uv pip install -c requirements.lock -r docs/requirements.txt
+      - name: Build documentation
+        run: sphinx-build -W docs/ docs-build
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload documentation
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs-build/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Publish documentation
+        id: deployment
+        uses: actions/deploy-pages@v4

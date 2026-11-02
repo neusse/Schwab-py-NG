@@ -7,12 +7,13 @@
 **Hardened Python access to the Charles Schwab API, built for code that trades real money.**
 
 [![Tests](https://github.com/neusse/Schwab-py-NG/actions/workflows/python.yml/badge.svg)](https://github.com/neusse/Schwab-py-NG/actions/workflows/python.yml)
+[![Documentation](https://github.com/neusse/Schwab-py-NG/actions/workflows/docs-pages.yml/badge.svg)](https://neusse.github.io/Schwab-py-NG/)
 [![Version](https://img.shields.io/badge/version-5.2.0-0ea5e9.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776ab.svg?logo=python&logoColor=white)](setup.py)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-14b8a6.svg)](#support-matrix)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Install](#installing) · [Quick start](#sixty-seconds-in) · [Capabilities](#what-it-covers) · [Documentation](docs/index.rst) · [Contributing](docs/contributing.rst)
+[Documentation](https://neusse.github.io/Schwab-py-NG/) · [Changes](CHANGELOG.md) · [Integration notes](INTEGRATION.md) · [Install](#installing) · [Quick start](#sixty-seconds-in) · [Contributing](docs/contributing.rst)
 
 </div>
 
@@ -47,6 +48,21 @@ exercise Windows.
 
 This repository is the install source for now; Schwab-py-NG has not been
 published to PyPI. Install it directly from GitHub as shown above.
+
+## Documentation and changes
+
+The complete, searchable documentation is published at
+**[neusse.github.io/Schwab-py-NG](https://neusse.github.io/Schwab-py-NG/)**.
+Start with the [getting-started
+guide](https://neusse.github.io/Schwab-py-NG/getting-started.html), then use the
+[client](https://neusse.github.io/Schwab-py-NG/client.html),
+[streaming](https://neusse.github.io/Schwab-py-NG/streaming.html), and
+[order-builder](https://neusse.github.io/Schwab-py-NG/order-builder.html)
+references as needed.
+
+For release-to-release behavior changes and compatibility notes, read the
+**[changelog](CHANGELOG.md)**. For the exact upstream repositories, revisions,
+and integration decisions behind NG, read **[INTEGRATION.md](INTEGRATION.md)**.
 
 ---
 
@@ -227,7 +243,7 @@ async def main():
 asyncio.run(main())
 ```
 
-New here? The **[getting started guide](https://github.com/neusse/Schwab-py-NG/blob/main/docs/getting-started.rst)** walks through
+New here? The **[getting started guide](https://neusse.github.io/Schwab-py-NG/getting-started.html)** walks through
 registering an app with Schwab and getting your first token.
 
 ---
@@ -243,7 +259,7 @@ registering an app with Schwab and getting your first token.
 | **Accounts** | Balances, positions, orders and transaction history |
 | **Sync and async** | Swap `Client` for `AsyncClient`, add `await`, change nothing else |
 
-The **[documentation](https://github.com/neusse/Schwab-py-NG/tree/main/docs)** is worth reading even if you end up calling
+The **[documentation](https://neusse.github.io/Schwab-py-NG/)** is worth reading even if you end up calling
 the API directly. Schwab's own portal is behind a login, so for much of this API
 those pages are the most accessible description of how it actually behaves.
 
