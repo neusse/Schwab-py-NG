@@ -14,10 +14,12 @@ edges off the parts that matter when the account is funded.
 
 .. code-block:: shell
 
+  pip uninstall -y schwab-py
   pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
 
 The distribution is ``schwab-py-ng`` and the compatible import package remains
-``schwab``.
+``schwab``. The uninstall must come first: both distributions own that package,
+and installing NG over the original can leave a corrupt mixture of their files.
 
 Once you have a token, the shape of it is this:
 

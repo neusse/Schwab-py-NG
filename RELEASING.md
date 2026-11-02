@@ -356,6 +356,7 @@ share an environment because both own the same import package.
 A git install works for testing an unreleased commit:
 
 ```shell
+pip uninstall -y schwab-py
 pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG@<sha>"
 ```
 

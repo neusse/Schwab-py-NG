@@ -18,6 +18,7 @@
 </div>
 
 ```shell
+pip uninstall -y schwab-py
 pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
 ```
 
@@ -289,10 +290,14 @@ A few things people ask for that Schwab's API does not offer:
 ## Installing
 
 ```shell
+pip uninstall -y schwab-py
 pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
 ```
 
-That is the whole install. Python 3.10 and up, no extras to remember.
+The uninstall is required even when the old package appears to work:
+`schwab-py` and `schwab-py-ng` both own the `schwab` import package, and
+installing one over the other can leave a mixed or partially deleted module.
+Python 3.10 and up, no extras to remember.
 
 The distribution is `schwab-py-ng`; the compatible import package remains
 `schwab`.

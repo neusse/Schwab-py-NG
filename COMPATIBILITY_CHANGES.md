@@ -65,7 +65,7 @@ package.
 Use a clean environment, or uninstall the original distribution first:
 
 ```shell
-pip uninstall schwab-py
+pip uninstall -y schwab-py
 pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
 ```
 

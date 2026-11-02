@@ -6221,21 +6221,18 @@ CASES = [
          '::test_the_documentation_imports_nothing_by_the_old_package_name',
          'index.rst'),
 
-    # The README's uninstall-first instruction was correct through 3.0.3 and
-    # strands anyone who still imports `schwab` from 4.0.0 on. Asserting that
-    # the README merely *names* `schwab-py` cannot catch its return.
-    Case('packaging/readme-does-not-say-uninstall-first',
+    # Both distributions own `schwab`, so removing the uninstall from an
+    # install block can produce a mixed package while every import still
+    # appears healthy. The packaging test must catch that deletion.
+    Case('packaging/readme-requires-uninstall-first',
          'README.md',
          '''```shell
-pip install schwab-py-ng
-```
-
-That is the whole install.''',
+pip uninstall -y schwab-py
+pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
+```''',
          '''```shell
-pip uninstall -y schwab-py && pip install schwab-py-ng
-```
-
-That is the whole install.''',
+pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
+```''',
          'tests/packaging_test.py::LongDescriptionTest'
          '::test_the_install_command_is_in_the_readme',
          'uninstall'),

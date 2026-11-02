@@ -139,20 +139,16 @@ Then install the library:
 
 .. code-block:: shell
 
+  pip uninstall -y schwab-py
   pip install "schwab-py-ng @ git+https://github.com/neusse/Schwab-py-NG.git"
 
-.. note::
+.. warning::
 
   ``schwab-py-ng`` and ``schwab-py`` both install the ``schwab`` import
-  package. Uninstall ``schwab-py`` before installing NG; they must not share
-  an environment.
-
-  **If you are upgrading from** ``schwab`` **3.0.3 or
-  earlier while** ``schwab-py`` **is also installed**, run ``pip install
-  --force-reinstall schwab-py`` afterwards. Those versions shipped a package
-  called ``schwab`` too, so uninstalling one deletes files the other is
-  using --- and it does it quietly: ``pip check`` stays happy and ``import
-  schwab`` still succeeds, up until the first submodule you actually use.
+  package. Run the uninstall first even when ``import schwab`` currently
+  succeeds. Installing NG over the original can mix files from both
+  distributions; uninstalling either one later can then delete files the
+  surviving installation needs. ``pip check`` may not detect the damage.
 
 Check that it worked:
 

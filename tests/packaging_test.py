@@ -2335,20 +2335,27 @@ class LongDescriptionTest(unittest.TestCase):
                 text = f.read()
         self.assertIn('schwab-py-ng @ git+https://github.com/', text)
 
-        # The README used to tell readers to uninstall `schwab-py` first,
-        # because both projects shipped a package called `schwab` and
-        # installing one over the other destroyed the install. The package is
-        # now `schwab` too, so they coexist and that instruction is wrong ---
-        # it would strand anyone who still imports `schwab`.
-        #
-        # Against the source for the same reason as the assertions above, and
-        # this one learned it the hard way: written against the rendered HTML
-        # it went GREEN under mutation, because the highlighter splits
-        # `pip uninstall -y schwab-py` with `<span>`s and the substring is not
-        # there to find. The README naming `schwab-py` at all is checked in
-        # `test_the_readme_renders_to_a_real_page`; what is checked here is
-        # that the old instruction has not come back.
-        self.assertIn('Uninstall `schwab-py`', text)
+        # Both distributions own the `schwab` import package. Every
+        # user-facing NG install command must therefore have the uninstall in
+        # the same code block immediately above it; installing over the old
+        # distribution can mix their files, and uninstalling either one later
+        # can then remove files the other needs. Check source because syntax
+        # highlighting splits both commands into spans in rendered HTML.
+        install = ('pip install "schwab-py-ng @ '
+                   'git+https://github.com/neusse/Schwab-py-NG')
+        uninstall = 'pip uninstall -y schwab-py'
+        for path in ('README.md', 'COMPATIBILITY_CHANGES.md',
+                     'docs/index.rst', 'docs/getting-started.rst',
+                     'RELEASING.md'):
+            with self.subTest(path=path), in_repo_root():
+                with open(path, encoding='utf-8') as f:
+                    source = f.read()
+                positions = [m.start() for m in re.finditer(
+                    re.escape(install), source)]
+                self.assertTrue(positions, '{} has no NG install'.format(path))
+                for position in positions:
+                    preceding = source[max(0, position - 160):position]
+                    self.assertIn(uninstall, preceding, path)
 
     @no_duplicates
     def test_setup_py_names_an_encoding_when_it_reads_a_file(self):
