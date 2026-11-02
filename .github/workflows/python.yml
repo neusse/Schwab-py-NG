@@ -1,88 +1,157 @@
 name: tests
 
 on:
-- push
-- pull_request
+  push:
+  pull_request:
+  # Lets CI be re-run on demand, without pushing an empty commit to provoke it.
+  workflow_dispatch:
 
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows-latest, ubuntu-latest, macos-latest]
-        python:
-        - version: "3.10"
-          toxenv: py310
-        - version: "3.11"
-          toxenv: py311
-        - version: "3.12"
-          toxenv: py312
-        - version: "3.13"
-          toxenv: py313
-        - version: "3.14-dev"
-          toxenv: py314
+        # Linux runs on every push. Windows joins pull requests, tags, and
+        # manual runs. The cross-platform risk in this library is
+        # concentrated in the token file writer, which renames files and sets
+        # permissions; that is worth proving before a merge or a release, not
+        # before every commit.
+        #
+        # workflow_dispatch is in the full-matrix list deliberately so the
+        # on-demand run checks Windows as well as Linux.
+        platform: >-
+          ${{
+            (github.event_name == 'pull_request'
+             || github.event_name == 'workflow_dispatch'
+             || startsWith(github.ref, 'refs/tags/'))
+            && fromJSON('["ubuntu-latest", "windows-latest"]')
+            || fromJSON('["ubuntu-latest"]')
+          }}
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.platform }}
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python.version }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python.version }}
-
-    - name: Install dependencies
+    - uses: actions/checkout@v7
+    # The exact build .python-versions pins for this minor version, which
+    # uv downloads and checks the hash of: the build every machine that
+    # runs this suite runs. A minor version with no pin fails here, by name.
+    - name: Pinned Python ${{ matrix.python }}
+      id: pin
+      shell: bash
       run: |
-        python -m pip install --upgrade pip
-        pip install tox
-        pip install ".[dev]"
-
-    - name: Test with tox ${{ matrix.python.toxenv }}
+        version=$(tr -d '\r' < .python-versions | grep -E "^${MINOR//./\\.}\.[0-9]+$") || {
+          echo "no pin for $MINOR in .python-versions"; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
       env:
-        TOXENV: ${{ matrix.python.toxenv }}
-      run: tox
+        MINOR: ${{ matrix.python }}
+    - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0: setup-uv publishes no floating major tag
+      with:
+        version: "0.13.4"
+        python-version: ${{ steps.pin.outputs.version }}
+        activate-environment: true
+    - name: The interpreter is the pinned build
+      shell: bash
+      run: >-
+        python -c "import platform, sys; v = platform.python_version();
+        sys.exit(0 if v == sys.argv[1] else 'running %s, pinned %s' % (v, sys.argv[1]))"
+        ${{ steps.pin.outputs.version }}
+
+    # With requirements.lock as a constraint, so every job tests the versions
+    # every other machine tests. Without it each run resolved afresh, and a
+    # release appearing between two runs changed what was under test.
+    - name: Install dependencies
+      run: uv pip install -c requirements.lock ".[dev]"
+
+    # Was `tox`, which is gone. It built an sdist, installed it into an
+    # isolated env, and then ran `coverage` as an external command under a
+    # different interpreter -- so the environment it had just built was never
+    # the one under test, and pytest imported the package from the working tree
+    # anyway. The Python version came from the job's own setup either way,
+    # which is the part that mattered. This runs the same command without the
+    # layer.
+    - name: Test
+      run: coverage run --rcfile=setup.cfg --source=schwab -p -m pytest tests/
 
     - name: Report coverage
-      if: matrix.python.version == '3.10'
+      if: matrix.python == '3.10'
       run: |
         coverage combine
+        # The reports are generated before the gate, and with the floor
+        # disabled, so that a run which fails `fail_under` still produces the
+        # report showing which lines caused it. Generated after `coverage
+        # report`, they would not exist on exactly the run you need them for.
+        coverage html --fail-under=0
+        coverage xml --fail-under=0
+        # This one is the gate: `fail_under` lives in setup.cfg.
         coverage report
-        coverage xml
 
-    - name: Upload coverage to Codecov  
-      if: matrix.python.version == '3.10'
-      uses: codecov/codecov-action@v4.0.1
+    # `htmlcov/` is the useful half of coverage -- which lines never ran,
+    # rather than a percentage -- and it was being generated and discarded.
+    - name: Keep the coverage report
+      if: ${{ !cancelled() && matrix.python == '3.10' }}
+      uses: actions/upload-artifact@v7
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: ./coverage.xml
-        flags: unittests
-        name: GitHub
+        # The 3.10 job runs on both platforms when the matrix is full,
+        # and upload-artifact refuses two artifacts with the same name.
+        name: coverage-${{ matrix.platform }}
+        path: |
+          htmlcov/
+          coverage.xml
+        retention-days: 14
+        # A failed test run skips the step above, so there is nothing to
+        # collect. That build is already red for a better reason; a warning
+        # about a missing artifact on top of it is noise.
+        if-no-files-found: ignore
 
     - name: Check twine
-      if: matrix.python.version == '3.10'
+      if: matrix.python == '3.10'
       run: |
-        python3 setup.py sdist bdist_wheel
-        twine check dist/*
+        # `setup.py sdist bdist_wheel` is deprecated -- setuptools calls the
+        # deprecation "overdue". `python -m build` is what publish.yml uses, so
+        # this checks the artifact that actually ships.
+        uv pip install -c requirements.lock build "readme_renderer[md]"
+        python -m build
+        # --strict, and readme_renderer[md] above: without that extra, twine
+        # reports PASSED on a markdown long_description having rendered
+        # nothing at all.
+        twine check --strict dist/*
 
-  readthedocs-test:
+  docs:
     strategy:
       fail-fast: false
       matrix:
         platform: [ubuntu-latest]
-        python:
-        - version: "3.12"
-          toxenv: py312
+        python: ["3.12"]
     runs-on: ${{ matrix.platform }}
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python.version }}
-      uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python.version }}
-
-    - name: Install dependencies
+    - uses: actions/checkout@v7
+    - name: Pinned Python ${{ matrix.python }}
+      id: pin
+      shell: bash
       run: |
-        python -m pip install -r docs/requirements.txt
+        version=$(tr -d '\r' < .python-versions | grep -E "^${MINOR//./\\.}\.[0-9]+$") || {
+          echo "no pin for $MINOR in .python-versions"; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+      env:
+        MINOR: ${{ matrix.python }}
+    - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0: setup-uv publishes no floating major tag
+      with:
+        version: "0.13.4"
+        python-version: ${{ steps.pin.outputs.version }}
+        activate-environment: true
+    - name: The interpreter is the pinned build
+      shell: bash
+      run: >-
+        python -c "import platform, sys; v = platform.python_version();
+        sys.exit(0 if v == sys.argv[1] else 'running %s, pinned %s' % (v, sys.argv[1]))"
+        ${{ steps.pin.outputs.version }}
+
+    # The lock as a constraint pins whatever docs/requirements.txt installs
+    # without adding anything to it, so that file still checks the imports
+    # sphinx needs.
+    - name: Install dependencies
+      run: uv pip install -c requirements.lock -r docs/requirements.txt
 
     - name: Verify that documentation builds
       run: |

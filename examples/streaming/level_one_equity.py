@@ -1,110 +1,90 @@
+"""A complete streaming consumer, with backpressure.
+
+The README shows the four lines that start a stream. This shows the shape a
+long-running one wants: a queue between the socket and your processing, so a
+slow consumer drops old data rather than stalling the reader, and an error
+handler so a feed that quietly stops looks different from a quiet market.
+
+Run it with a token file you already have --- see the getting started guide for
+how to create one.
+"""
+
 import asyncio
 import pprint
 
-from schwab.streaming import StreamClient
 import schwab
+from schwab.streaming import StreamClient
 
-API_KEY = "XXXXXX"
-CLIENT_SECRET = "XXXXXX"
-CALLBACK_URL = "https://xxxxxx"
+API_KEY = 'XXXXXX'
+APP_SECRET = 'XXXXXX'
+TOKEN_PATH = './token.json'
 
-class MyStreamConsumer:
-    """
-    We use a class to enforce good code organization practices
-    """
+SYMBOLS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'SPY']
 
-    def __init__(self, api_key, client_secret, callback_url, queue_size=0,
-                 token_path='./token.json'):
-        """
-        We're storing the configuration variables within the class for easy
-        access later in the code!
-        """
+
+class StreamConsumer:
+    def __init__(self, api_key, app_secret, token_path, queue_size=100):
         self.api_key = api_key
-        self.client_secret = client_secret
-        self.account_id = None
-        self.account_hash = None
-        self.callback_url = callback_url
+        self.app_secret = app_secret
         self.token_path = token_path
 
-        self.schwab_client = None
+        self.client = None
         self.stream_client = None
 
-        self.symbols = [
-            'GOOG', 'GOOGL', 'BP', 'CVS', 'ADBE', 'CRM', 'SNAP', 'AMZN',
-            'BABA', 'DIS', 'TWTR', 'M', 'USO', 'AAPL', 'NFLX', 'GE', 'TSLA',
-            'F', 'SPY', 'FDX', 'UBER', 'ROKU', 'X', 'FB', 'BIDU', 'FIT'
-        ]
-
-        # Create a queue so we can queue up work gathered from the client
+        # Bounded on purpose. An unbounded queue in front of a slow consumer
+        # does not fix anything -- it converts falling behind into growing
+        # memory, and the data at the front is the stalest.
         self.queue = asyncio.Queue(queue_size)
 
     def initialize(self):
-        """
-        Create the clients and log in. Token should be previously generated using client_from_manual_flow()
+        self.client = schwab.auth.client_from_token_file(
+                self.token_path, api_key=self.api_key,
+                app_secret=self.app_secret)
 
-        TODO: update to easy_client() when client_from_login_flow() works, 
-        or when easy_client() can redirect to client_from_manual_flow()
-        """
-        self.schwab_client = schwab.auth.client_from_token_file(self.token_path, 
-            api_key=self.api_key,
-            app_secret=self.client_secret)
+        self.stream_client = StreamClient(self.client)
 
-        account_info = self.schwab_client.get_account_numbers().json()
-
-        self.account_id = int(account_info[0]['accountNumber'])
-        self.account_hash = account_info[0]['hashValue']
-
-        self.stream_client = StreamClient(
-            self.schwab_client, account_id=self.account_id)
-
-        # The streaming client wants you to add a handler for every service type
         self.stream_client.add_level_one_equity_handler(
-            self.handle_level_one_equity)
+                self.handle_level_one_equity)
+
+        # Failures this client absorbs rather than raising: a handler that
+        # raised, a late rejection of a request nobody is waiting for, a frame
+        # that will not parse. Without this they are logged and nothing else,
+        # so a broken feed is indistinguishable from a quiet one.
+        self.stream_client.add_error_handler(self.handle_error)
 
     async def stream(self):
-        await self.stream_client.login()  # Log into the streaming service
+        await self.stream_client.login()
+        await self.stream_client.level_one_equity_subs(SYMBOLS)
 
-        # TODO: QOS is currently not working as the command formatting has changed. Update & re-enable after docs are released
-        #await self.stream_client.quality_of_service(StreamClient.QOSLevel.EXPRESS)
-
-        await self.stream_client.level_one_equity_subs(self.symbols)
-
-        # Kick off our handle_queue function as an independent coroutine
         asyncio.ensure_future(self.handle_queue())
 
-        # Continuously handle inbound messages
         while True:
             await self.stream_client.handle_message()
 
     async def handle_level_one_equity(self, msg):
-        """
-        This is where we take msgs from the streaming client and put them on a
-        queue for later consumption. We use a queue to prevent us from wasting
-        resources processing old data, and falling behind.
-        """
-        # if the queue is full, make room
-        if self.queue.full():  # This won't happen if the queue doesn't have a max size
-            print('Handler queue is full. Awaiting to make room... Some messages might be dropped')
-            await self.queue.get()
+        # Called from the reader, so it must not block. Anything slow belongs
+        # on the other side of the queue.
+        if self.queue.full():
+            await self.queue.get()   # drop the oldest
         await self.queue.put(msg)
 
+    async def handle_error(self, service, exception, message):
+        # Note the order: service first. And do not treat service and message
+        # both being None as a signature meaning anything -- see
+        # add_error_handler's documentation for why.
+        print('stream error on %r: %r' % (service, exception))
+
     async def handle_queue(self):
-        """
-        Here we pull messages off the queue and process them.
-        """
         while True:
             msg = await self.queue.get()
             pprint.pprint(msg)
 
 
 async def main():
-    """
-    Create and instantiate the consumer, and start the stream
-    """
-    consumer = MyStreamConsumer(api_key=API_KEY, client_secret=CLIENT_SECRET, callback_url=CALLBACK_URL)
-
+    consumer = StreamConsumer(API_KEY, APP_SECRET, TOKEN_PATH)
     consumer.initialize()
     await consumer.stream()
+
 
 if __name__ == '__main__':
     asyncio.run(main())

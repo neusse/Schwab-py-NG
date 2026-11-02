@@ -1,5 +1,7 @@
 from enum import Enum
 
+from ..utils import SchwabError
+
 
 class __BaseInstrument:
     def __init__(self, asset_type, symbol):
@@ -21,34 +23,65 @@ class OptionInstrument(__BaseInstrument):
         super().__init__('OPTION', symbol)
 
 
-class InvalidOrderException(Exception):
-    '''Raised when attempting to build an incomplete order'''
+class InvalidOrderException(SchwabError):
+    '''Nothing in this library raises this. It is kept because code written
+    against it would break on its removal; an incomplete order is not
+    refused when built, so check the order before placing it.'''
     pass
 
 
 class Duration(Enum):
     '''
     Length of time over which the trade will be active.
+
+    .. note::
+        Not every value in this enum is accepted for every asset type. Schwab
+        accepts only ``DAY``, ``GOOD_TILL_CANCEL`` and ``FILL_OR_KILL`` for
+        equity orders. The remaining values are rejected at order placement
+        with ``HTTP 400``, and a message of the form
+        ``Invalid value 'IMMEDIATE_OR_CANCEL'``. Individual values are marked
+        below. Note this validation happens when the order is placed, not when
+        it is built, so an unsupported value will not be caught by
+        :class:`~schwab.orders.generic.OrderBuilder`.
     '''
     #: Cancel the trade at the end of the trading day. Note if the order cannot
     #: be filled all at once, you may see partial executions throughout the day.
     DAY = 'DAY'
 
-    # TODO: Implement order cancellation date
-
-    #: Keep the trade open for six months, or until the end of the cancel date,
-    #: whichever is shorter. Note if the order cannot be filled all at once, you
-    #: may see partial executions over the lifetime of the order.
+    #: Keep the trade open past the end of the trading day. How long Schwab
+    #: keeps it open, and how that combines with a cancel time set through
+    #: :meth:`~schwab.orders.generic.OrderBuilder.set_cancel_time`, has not
+    #: been measured. Note if the order cannot be filled all at once, you may
+    #: see partial executions over the lifetime of the order.
     GOOD_TILL_CANCEL = 'GOOD_TILL_CANCEL'
 
     #: Either execute the order immediately at the specified price, or cancel it
     #: immediately.
     FILL_OR_KILL = 'FILL_OR_KILL'
 
-    # TODO: Document these
+    #: Immediately execute whatever portion of the order it can at the specified
+    #: price, and cancel whatever portion remains unfilled.
+    #:
+    #: **Not supported for equity orders**, which are rejected with ``HTTP 400``
+    #: at placement.
     IMMEDIATE_OR_CANCEL = 'IMMEDIATE_OR_CANCEL'
+
+    #: Keep the trade open until the end of the current trading week.
+    #:
+    #: **Not supported for equity orders**, which are rejected with ``HTTP 400``
+    #: at placement.
     END_OF_WEEK = 'END_OF_WEEK'
+
+    #: Keep the trade open until the end of the current calendar month.
+    #:
+    #: **Not supported for equity orders**, which are rejected with ``HTTP 400``
+    #: at placement.
     END_OF_MONTH = 'END_OF_MONTH'
+
+    #: Keep the trade open until the end of the next calendar month.
+    #:
+    #: **Not supported for equity orders**, which are rejected with ``HTTP 400``
+    #: at placement.
     NEXT_END_OF_MONTH = 'NEXT_END_OF_MONTH'
 
 
@@ -144,62 +177,50 @@ class ComplexOrderStrategyType(Enum):
     #: No complex order strategy. This is the default.
     NONE = 'NONE'
 
-    #: `Covered call <https://tickertape.tdameritrade.com/trading/
-    #: selling-covered-call-options-strategy-income-hedging-15135>`__
+    #: Covered call
     COVERED = 'COVERED'
 
-    #: `Vertical spread <https://tickertape.tdameritrade.com/trading/
-    #: vertical-credit-spreads-high-probability-15846>`__
+    #: Vertical spread
     VERTICAL = 'VERTICAL'
 
-    #: `Ratio backspread <https://tickertape.tdameritrade.com/trading/
-    #: pricey-stocks-ratio-spreads-15306>`__
+    #: Ratio backspread
     BACK_RATIO = 'BACK_RATIO'
 
-    #: `Calendar spread <https://tickertape.tdameritrade.com/trading/
-    #: calendar-spreads-trading-primer-15095>`__
+    #: Calendar spread
     CALENDAR = 'CALENDAR'
 
-    #: `Diagonal spread <https://tickertape.tdameritrade.com/trading/
-    #: love-your-diagonal-spread-15030>`__
+    #: Diagonal spread
     DIAGONAL = 'DIAGONAL'
 
-    #: `Straddle spread <https://tickertape.tdameritrade.com/trading/
-    #: straddle-strangle-option-volatility-16208>`__
+    #: Straddle spread
     STRADDLE = 'STRADDLE'
 
-    #: `Strandle spread <https://tickertape.tdameritrade.com/trading/
-    #: straddle-strangle-option-volatility-16208>`__
+    #: Strandle spread
     STRANGLE = 'STRANGLE'
 
     COLLAR_SYNTHETIC = 'COLLAR_SYNTHETIC'
 
-    #: `Butterfly spread <https://tickertape.tdameritrade.com/trading/
-    #: butterfly-spread-options-15976>`__
+    #: Butterfly spread
     BUTTERFLY = 'BUTTERFLY'
 
     #: `Condor spread <https://www.investopedia.com/terms/c/
     #: condorspread.asp>`__
     CONDOR = 'CONDOR'
 
-    #: `Iron condor spread <https://tickertape.tdameritrade.com/trading/
-    #: iron-condor-options-spread-your-trading-wings-15948>`__
+    #: Iron condor spread
     IRON_CONDOR = 'IRON_CONDOR'
 
-    #: `Roll a vertical spread <https://tickertape.tdameritrade.com/trading/
-    #: exit-winning-losing-trades-16685>`__
+    #: Roll a vertical spread
     VERTICAL_ROLL = 'VERTICAL_ROLL'
 
-    #: `Collar strategy <https://tickertape.tdameritrade.com/trading/
-    #: stock-hedge-options-collars-15529>`__
+    #: Collar strategy
     COLLAR_WITH_STOCK = 'COLLAR_WITH_STOCK'
 
     #: `Double diagonal spread <https://optionstradingiq.com/
     #: the-ultimate-guide-to-double-diagonal-spreads/>`__
     DOUBLE_DIAGONAL = 'DOUBLE_DIAGONAL'
 
-    #: `Unbalanced butterfy spread  <https://tickertape.tdameritrade.com/
-    #: trading/unbalanced-butterfly-strong-directional-bias-15913>`__
+    #: Unbalanced butterfy spread
     UNBALANCED_BUTTERFLY = 'UNBALANCED_BUTTERFLY'
     UNBALANCED_CONDOR = 'UNBALANCED_CONDOR'
     UNBALANCED_IRON_CONDOR = 'UNBALANCED_IRON_CONDOR'
@@ -277,6 +298,13 @@ class PriceLinkType(Enum):
 
 
 class TaxLotMethod(Enum):
+    '''
+    Which lots a closing order sells, and so which gains it realises: FIFO
+    and LIFO close the same position at different cost bases. Set with
+    :meth:`~schwab.orders.generic.OrderBuilder.set_tax_lot_method`. These are
+    the seven values Schwab's order schema lists for ``taxLotMethod``, which
+    describes none of them; none has been tried against a live order here.
+    '''
     FIFO = 'FIFO'
     LIFO = 'LIFO'
     HIGH_COST = 'HIGH_COST'
@@ -319,6 +347,19 @@ class OptionInstruction(Enum):
 
     #: Exit an existing short position in an option
     BUY_TO_CLOSE = 'BUY_TO_CLOSE'
+
+
+class QuantityType(Enum):
+    '''
+    Values for an order leg's ``quantityType``. Schwab's order schema lists
+    these three on each ``orderLegCollection`` entry and describes none of
+    them, so what each means -- and how it relates to the leg's ``quantity`` --
+    is not established. None has been tested against a live order here.
+    '''
+
+    SHARES = 'SHARES'
+    DOLLARS = 'DOLLARS'
+    ALL_SHARES = 'ALL_SHARES'
 
 
 class SpecialInstruction(Enum):

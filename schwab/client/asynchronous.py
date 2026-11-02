@@ -2,15 +2,20 @@ from .base import BaseClient
 from ..debug import register_redactions_from_response
 from ..utils import LazyLog
 
-def register_redactions_from_response(x):
-    pass
-
 import json
 
 
 class AsyncClient(BaseClient):
+    '''
+    :class:`Client` for ``asyncio``: the same methods, each a coroutine to be
+    awaited. Made by the auth functions when given ``asyncio=True``.
+    '''
 
     async def close_async_session(self):
+        '''Closes the underlying HTTP session and the connections it is
+        holding. The ``asyncio`` counterpart of
+        :meth:`Client.close_session`; the client cannot be used after it.
+        '''
         await self.session.aclose()
 
     async def _get_request(self, path, params):
@@ -20,7 +25,8 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: GET to %s, params=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(params, indent=4)))
 
-        resp = await self.session.get(dest, params=params)
+        with self._translate_token_errors():
+            resp = await self.session.get(dest, params=params)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
@@ -32,7 +38,8 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: POST to %s, json=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        resp = await self.session.post(dest, json=data)
+        with self._translate_token_errors():
+            resp = await self.session.post(dest, json=data)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
@@ -44,7 +51,8 @@ class AsyncClient(BaseClient):
         self.logger.debug('Req %s: PUT to %s, json=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        resp = await self.session.put(dest, json=data)
+        with self._translate_token_errors():
+            resp = await self.session.put(dest, json=data)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
@@ -55,7 +63,8 @@ class AsyncClient(BaseClient):
         req_num = self._req_num()
         self.logger.debug('Req %s: DELETE to %s', req_num, dest)
 
-        resp = await self.session.delete(dest)
+        with self._translate_token_errors():
+            resp = await self.session.delete(dest)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp

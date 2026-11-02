@@ -1,5 +1,5 @@
 import atexit
-import httpx
+import httpx2
 import json
 import logging
 import sys
@@ -7,7 +7,9 @@ import schwab
 
 
 def get_logger():
-    return logging.getLogger(__name__)
+    from schwab import _redact
+    return _redact.get_logger(__name__)
+
 
 
 class LogRedactor:
@@ -45,12 +47,27 @@ class LogRedactor:
         return msg
 
 
+# Response redaction is only useful when the logs are going to be shared, and it
+# is not free: it parses and walks every successful response, and every value it
+# finds is remembered for the life of the process so it can be scrubbed from
+# future log lines. enable_bug_report_logging turns it on, and says in its own
+# documentation that it carries a performance penalty and does not belong in
+# production.
+_COLLECT_RESPONSE_REDACTIONS = False
+
+
 def register_redactions_from_response(resp):
     '''
     Convenience method that calls ``register_redactions`` if resp represents a
     successful response. Note this method assumes that resp has a JSON contents.
+
+    Does nothing unless :func:`enable_bug_report_logging` has been called, since
+    that is the only context in which the collected values are used.
     '''
-    if resp.status_code == httpx.codes.OK:
+    if not _COLLECT_RESPONSE_REDACTIONS:
+        return
+
+    if resp.status_code == httpx2.codes.OK:
         try:
             register_redactions(resp.json())
         except json.decoder.JSONDecodeError:
@@ -58,8 +75,16 @@ def register_redactions_from_response(resp):
 
 
 def register_redactions(obj, key_path=None,
+                        # Note these are matched as substrings of the key, so
+                        # a pattern which is short or common catches unrelated
+                        # fields, and redaction is plain string substitution
+                        # over the whole log. 'account' would match
+                        # accountValue and accountColor and take every balance
+                        # and the word 'Green' with it, so the two Schwab
+                        # identifiers worth hiding are named in full.
                         bad_patterns=[
-                            'auth', 'acl', 'displayname', 'id', 'key', 'token'],
+                            'accountnumber', 'acl', 'auth', 'displayname',
+                            'hashvalue', 'id', 'key', 'token'],
                         whitelisted=set([
                             'requestid',
                             'token_type',
@@ -110,16 +135,32 @@ def enable_bug_report_logging():
     _enable_bug_report_logging()
 
 
-def _enable_bug_report_logging(output=sys.stderr, loggers=None):
+def _enable_bug_report_logging(output=None, loggers=None):
     '''
     Module-internal version of :func:`enable_bug_report_logging`, intended for
-    use in tests.
+    use in tests. ``output`` defaults to ``sys.stderr`` as it is at program
+    exit, when the logs are actually written.
     '''
+    global _COLLECT_RESPONSE_REDACTIONS
+    _COLLECT_RESPONSE_REDACTIONS = True
+
     if loggers is None:
+        # Imported here rather than at module scope: `schwab/__init__.py`
+        # does not pull in `contrib`, so naming it at the top would make
+        # `import schwab` load a subpackage nothing else needs. It belongs
+        # in the list because the one thing it logs -- a key Schwab added to
+        # a decimal object -- is exactly what a bug report wants to carry.
+        #
+        # `from ... import ... as` rather than `import schwab.contrib.util`,
+        # which binds the name `schwab` locally and turns every other
+        # `schwab.` reference in this function into an UnboundLocalError.
+        from schwab.contrib import util as contrib_util
+
         loggers = (
             schwab.auth.get_logger(),
             schwab.client.base.get_logger(),
             schwab.streaming.get_logger(),
+            contrib_util.get_logger(),
             get_logger())
 
     class RecordingHandler(logging.Handler):
@@ -139,15 +180,30 @@ def _enable_bug_report_logging(output=sys.stderr, loggers=None):
         logger.addHandler(handler)
 
     def write_logs():
-        print(file=output)
-        print(' ### BEGIN REDACTED LOGS ###', file=output)
-        print(file=output)
+        # sys.stderr is looked up here rather than captured as a default
+        # argument, which would bind whatever it was when this module was
+        # imported. These logs are written at program exit, so the stream that
+        # matters is the one the program is using then.
+        out = sys.stderr if output is None else output
 
-        for msg in handler.messages:
-            msg = schwab.LOG_REDACTOR.redact(msg)
-            print(msg, file=output)
+        try:
+            print(file=out)
+            print(' ### BEGIN REDACTED LOGS ###', file=out)
+            print(file=out)
+
+            for msg in handler.messages:
+                msg = schwab.LOG_REDACTOR.redact(msg)
+                print(msg, file=out)
+        except (ValueError, OSError):
+            # The stream is gone. Closed before the interpreter shut down
+            # (ValueError), or the far end of a pipe went away (OSError, and
+            # in practice BrokenPipeError -- `python bot.py 2>&1 | head` is
+            # enough). There is nowhere left to write the report, and a
+            # traceback out of an atexit handler is a worse last word than
+            # nothing.
+            pass
     atexit.register(write_logs)
 
-    get_logger().debug('schwab-api version %s', schwab.__version__)
+    get_logger().debug('schwab version %s', schwab.__version__)
 
     return write_logs

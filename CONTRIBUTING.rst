@@ -1,81 +1,171 @@
-=============================
-Contributing to ``schwab-py``
-=============================
+===========================
+Contributing to ``schwab``
+===========================
 
-Fixing a bug? Adding a feature? Just cleaning up for the sake of cleaning up? 
-Great! No improvement is too small for me, and I'm always happy to take pull 
-requests. Read this guide to learn how to set up your environment so you can 
-contribute.
+Fixing a bug? Adding a feature? Cleaning something up for the sake of cleaning
+it up? All welcome, and no improvement is too small.
+
+Branch from ``main``, one concern per branch. `RELEASING.md
+<https://github.com/neusse/Schwab-py-NG/blob/main/RELEASING.md>`__ collects the
+rules this project has learned by getting them wrong, and is worth ten minutes
+before a first patch.
 
 ------------------------------
-Setting up the Dev Environment
+Setting up the dev environment
 ------------------------------
 
-Dependencies are listed in the `requirements.txt` file. These development 
-requirements are distinct from the requirements listed in `setup.py` and include 
-some additional packages around testing, documentation generation, etc.
-
-Before you install anything, I highly recommend setting up a `virtualenv` so you 
-don't pollute your system installation directories:
+Everything, including the development tooling, is declared in ``setup.py``.
+``requirements.lock`` pins the exact versions the suite is tested against, on
+every supported Python, and CI installs with it; install with it too, so a
+failure you see is one CI would see:
 
 .. code-block:: shell
 
-  pip install virtualenv
-  virtualenv -v virtualenv
-  source virtualenv/bin/activate
+  python -m venv venv
+  source venv/bin/activate       # Windows: venv\Scripts\activate
 
-Next, install project requirements:
+  pip install -c requirements.lock -e ".[dev]"
 
-.. code-block:: shell
-
-  pip install ".[dev]"
-
-Finally, verify everything works by running tests:
+CI runs each Python as the exact build ``.python-versions`` pins, which
+`uv <https://github.com/astral-sh/uv>`__ downloads and checks the hash of. To
+test on the same build, create the virtualenv from it instead:
 
 .. code-block:: shell
 
-  make test
+  export UV_PYTHON_INSTALL_DIR="$PWD/.uv-python"  # this checkout's own
+  uv python install --no-bin 3.14.8               # from .python-versions
+  "$(uv python find --no-python-downloads 3.14.8)" -m venv venv
 
-At this point you can make your changes.
+Both settings keep the build to this checkout. ``.uv-python/`` is gitignored,
+and uv's shared directory re-points its ``cpython-3.14`` link to the newest
+patch release it holds, which moves every other virtualenv built through that
+link when a newer one arrives. ``--no-bin`` keeps uv from putting
+``python3.14`` on your ``PATH``, where it would quietly replace the system's
+for everything else you run.
 
-Note that if you are using a virtual environment and switch to a new terminal
-your virtual environment will not be active in the new terminal,
-and you need to run the activate command again.
-If you want to disable the loaded virtual environment in the same terminal window,
-use the command:
+uv reads ``.python-versions`` as well: in this checkout a bare ``uv venv`` or
+``uv run`` picks its first line, 3.10.22, and downloads it if it is missing.
+Name the version, as above.
 
-.. code-block:: shell
+The ``-e`` matters: without it you edit the source tree and test the copy in
+``site-packages``, and the two drift the moment you change anything.
 
-  deactivate
-
-----------------------
-Development Guidelines
-----------------------
-
-+++++++++++++++++
-Test your changes
-+++++++++++++++++
-
-This project aims for high test coverage. All changes must be properly tested, 
-and we will accept no PRs that lack appropriate unit testing. We also expect 
-existing tests to pass. You can run your tests using: 
+Then turn on the commit hooks:
 
 .. code-block:: shell
 
-  make test
+  git config core.hooksPath tools/hooks
 
-++++++++++++++++++
-Document your code
-++++++++++++++++++
+They run ``tools/light_check.py`` on what you are about to commit (measured at
+under a tenth of a second for an eight-file commit): every staged Python file
+must parse and gain no pyflakes warning it did not already have, the diff
+must have no whitespace errors, and no staged file may carry, in its name or
+its content, a word on the check's ``FORBIDDEN`` list: names of private
+infrastructure this repository never carries.
+The full suite is not part of it; that runs below, and on every pull request.
 
-Documentation is how users learn to use your code, and no feature is complete 
-without a full description of how to use it. If your PR changes external-facing 
-interfaces, or if it alters semantics, the changes must be thoroughly described 
-in the docstrings of the affected components. If your change adds a substantial 
-new module, a new section in the documentation may be justified. 
-
-Documentation is built using `Sphinx <https://www.sphinx-doc.org/en/master/>`__:
+Then check the environment before you change anything, so a later failure is
+yours:
 
 .. code-block:: shell
 
-  sphinx-build docs/ docs-build
+  pytest tests/ -q -n auto
+
+Around 1,350 tests, a few seconds on every core. ``-n auto`` is
+`pytest-xdist <https://pypi.org/project/pytest-xdist/>`__, which ``[dev]``
+installs; drop it to run in one process. If your virtualenv is not active in
+a new terminal, run the ``activate`` line again; ``deactivate`` turns it off.
+
+-------------------------
+Running what CI will run
+-------------------------
+
+Four commands. Between them they are everything the ``tests`` workflow checks,
+so a green run here is a green run there:
+
+.. code-block:: shell
+
+  pytest tests/ -q -n auto                  # the suite
+  python -m sphinx -W docs/ /tmp/docs-build # docs, warnings are errors
+  python -m build                           # the artifacts
+  python -m twine check --strict dist/*     # what PyPI will accept
+
+Two of those are easy to get wrong locally:
+
+- ``-W`` **is not optional.** CI builds the documentation with warnings as
+  errors. Without it a broken cross-reference builds cleanly on your machine and
+  fails on the pull request.
+- ``python -m build``, **not** ``setup.py``. ``setup.py`` is not imported by the
+  suite, so an edit that leaves it unparseable is invisible to ``pytest``. The
+  build is what proves the package still assembles.
+
+CI runs the suite on CPython 3.10 through 3.14. Pushes to a branch run Linux
+only; pull requests, tags, and manual runs include Windows.
+
+--------------------------
+A note about the testing
+--------------------------
+
+The suite mocks the network. It proves this library builds the request it
+intended to build. It says nothing about whether Schwab accepts that request, or
+whether the answer is right.
+
+That distinction has mattered every time. **Every defect found in this library so
+far has been in code with 100% line coverage** — prices silently a cent low, a
+token file a crash could destroy, an enum advertising values the venue rejects,
+redaction that never ran, an order routed to a venue nobody asked for. Coverage
+measures which lines executed, not whether what they produced was correct.
+
+So when you add a test: **revert your fix and watch it fail.** A test that passes
+either way is worse than no test, because it looks like protection. Two things
+that have made that check lie here, both worth knowing:
+
+- Clear ``__pycache__`` first. CPython invalidates bytecode on modification time
+  and size, so a same-second edit can leave a stale ``.pyc`` in place and you
+  measure the old code.
+- Confirm the edit actually applied. A mutation that silently did not change the
+  file looks exactly like a test that did not notice.
+
+If a behaviour can only be established against the live API, say so in the pull
+request — say what you observed and when. That is a good answer, and a more
+honest one than a mocked test implying more than it proves.
+
+-------------------
+Documenting changes
+-------------------
+
+No feature is complete without a description of how to use it. If your change
+alters an external-facing interface or its semantics, the docstrings must say so;
+a substantial new module may justify a section of its own.
+
+.. code-block:: shell
+
+  python -m sphinx -W docs/ /tmp/docs-build
+
+Documentation is checked by the suite as well as by Sphinx, which surprises
+people, so it is worth knowing what is enforced:
+
+- every ``:func:``/``:meth:``/``:class:`` target and every ``autodoc`` directive
+  must resolve to something that exists — ``sphinx -W`` does *not* check this,
+  and a page once told readers to call a method that had never existed
+- every keyword argument in a documentation code block, and in ``examples/``,
+  must be one the callee actually accepts
+- every URL host must be on an allowlist, and links into this repository must
+  point at a file that exists — including the ``#anchor``, which must match a
+  real section heading
+- no link target may wrap across a line. Sphinx joins the halves and renders
+  it correctly, so the page looks right while everything reading the source,
+  the link checker included, sees a truncated URL
+
+If one of those fails, the test says which file and which line.
+
+--------
+Examples
+--------
+
+``examples/`` is deliberately small. An example earns its place when it teaches
+an *assembly* the reference documentation cannot — a bounded queue in front of a
+stream, a token-expiry loop, an order followed to a terminal state. A sample that
+just repeats a call is already covered by the docs, and an uncovered file is one
+that rots: the streaming example spent four years subscribing to tickers that had
+been delisted.

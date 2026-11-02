@@ -2,13 +2,32 @@ from .base import BaseClient
 from ..utils import LazyLog
 from ..debug import register_redactions_from_response
 
-def register_redactions_from_response(x):
-    pass
-
 import json
 
 
 class Client(BaseClient):
+    '''
+    The HTTP client: one method per endpoint Schwab publishes, each returning
+    the raw ``httpx2`` response. Make one with :ref:`the auth functions
+    <auth>` rather than directly, since they manage the token.
+    :class:`AsyncClient` is the same client for ``asyncio``.
+    '''
+
+    def close_session(self):
+        '''Closes the underlying HTTP session and the connections it is
+        holding.
+
+        Only worth calling if you are creating clients repeatedly -- one client
+        held for the life of the process needs nothing. Without it, connections
+        are released whenever the session is garbage collected, which is not a
+        moment anything guarantees.
+
+        The client cannot be used after this.
+        :meth:`AsyncClient.close_async_session` is the equivalent for the
+        asyncio client.
+        '''
+        self.session.close()
+
     def _get_request(self, path, params):
         dest = 'https://api.schwabapi.com' + path
 
@@ -16,7 +35,8 @@ class Client(BaseClient):
         self.logger.debug('Req %s: GET to %s, params=%s',
                 req_num, dest, LazyLog(lambda: json.dumps(params, indent=4)))
 
-        resp = self.session.get(dest, params=params)
+        with self._translate_token_errors():
+            resp = self.session.get(dest, params=params)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
@@ -28,7 +48,8 @@ class Client(BaseClient):
         self.logger.debug('Req %s: POST to %s, json=%s',
             req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        resp = self.session.post(dest, json=data)
+        with self._translate_token_errors():
+            resp = self.session.post(dest, json=data)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
@@ -40,7 +61,8 @@ class Client(BaseClient):
         self.logger.debug('Req %s: PUT to %s, json=%s',
             req_num, dest, LazyLog(lambda: json.dumps(data, indent=4)))
 
-        resp = self.session.put(dest, json=data)
+        with self._translate_token_errors():
+            resp = self.session.put(dest, json=data)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp
@@ -49,9 +71,10 @@ class Client(BaseClient):
         dest = 'https://api.schwabapi.com' + path
 
         req_num = self._req_num()
-        self.logger.debug('Req %s: DELETE to %s'.format(req_num, dest))
+        self.logger.debug('Req %s: DELETE to %s', req_num, dest)
 
-        resp = self.session.delete(dest)
+        with self._translate_token_errors():
+            resp = self.session.delete(dest)
         self._log_response(resp, req_num)
         register_redactions_from_response(resp)
         return resp

@@ -1,25 +1,32 @@
 '''Defines the basic client and methods for creating one. This client is
-completely unopinionated, and provides an easy-to-use wrapper around the TD
-Ameritrade HTTP API.'''
+completely unopinionated, and provides an easy-to-use wrapper around the Schwab
+HTTP API.'''
 
-from abc import ABC, abstractmethod
+from authlib.integrations.base_client.errors import (
+        InvalidTokenError, MissingTokenError, OAuthError,
+        UnsupportedTokenTypeError)
 from enum import Enum
 
+import contextlib
 import datetime
+import inspect
 import json
-import logging
-import pickle
+import os
 import schwab
-import time
 import warnings
 
 from schwab.orders.generic import OrderBuilder
 
-from ..utils import EnumEnforcer
+from ..utils import (EnumEnforcer, TokenRefreshError, _expiry_authlib_acts_on,
+                     _format_iso_instant, _is_instance, _qualified_type_name,
+                     _refusal_text, _token_endpoint_answer)
+from .. import _redact
+from .. import utils as _utils
 
 
 def get_logger():
-    return logging.getLogger(__name__)
+    return _redact.get_logger(__name__)
+
 
 
 ##########################################################################
@@ -47,6 +54,8 @@ class BaseClient(EnumEnforcer):
         self.request_number = 0
 
         schwab.LOG_REDACTOR.register(api_key, 'API_KEY')
+        _redact.register(api_key, 'APP_KEY')
+        _redact.protect_dependencies()
 
         self.token_metadata = token_metadata
 
@@ -54,12 +63,23 @@ class BaseClient(EnumEnforcer):
         self.set_timeout(30.0)
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
-    # of utcnow(). To avoid being confused by this, capture these values here so
-    # we can use them later.
-    _DATETIME = datetime.datetime
-    _DATE = datetime.date
+    # of utcnow(). To avoid being confused by this, these are the values
+    # captured before any patch, taken from utils so there is one capture
+    # rather than two that could disagree.
+    _DATETIME = _utils._DATETIME
+    _DATE = _utils._DATE
 
     def _log_response(self, resp, req_num):
+        # Full account numbers are registered before the body is logged, at
+        # every level, so this line and any later one -- a stream frame, an
+        # error -- carries them masked. Only a body that names one is parsed,
+        # spelled as Schwab spells it in every response that carries one; a
+        # case-insensitive test would copy every body, option chains included.
+        try:
+            if b'ccountNumber' in resp.content:
+                _redact.register_account_numbers(resp.json())
+        except Exception:
+            pass
         self.logger.debug('Req %s: GET response: %s, content=%s',
             req_num, resp.status_code, resp.text)
 
@@ -67,13 +87,201 @@ class BaseClient(EnumEnforcer):
         self.request_number += 1
         return self.request_number
 
+    @staticmethod
+    def _refresh_token_is_invalid(error):
+        '''Whether ``error`` means no amount of retrying will get a new token.
+
+        Two ways that happens. The stored token may be unusable before anything
+        is sent -- authlib raises MissingTokenError or InvalidTokenError
+        locally, and those are handled first below. (UnsupportedTokenTypeError
+        is terminal only when authlib will not replace the stored token by
+        itself, which only the client can see, so ``_translate_token_errors``
+        decides that one.) Otherwise Schwab may have rejected the grant, which
+        is the rest of this.
+
+        RFC 6749 section 5.2 defines ``invalid_grant`` as the token endpoint's
+        answer when the grant presented -- here, the refresh token -- is
+        invalid, expired or revoked. It is the one failure on this path which
+        retrying cannot fix, because a new refresh token only comes from the
+        full authorization_code flow.
+
+        Schwab does not put that code where the standard says it goes. It
+        answers with an outer error of ``unsupported_token_type``, which RFC
+        7009 defines for the *revocation* endpoint and which describes nothing
+        that happened here, and nests the real response as a JSON string inside
+        the description::
+
+            unsupported_token_type: 400 Bad Request: {"error_description":
+            "Refresh token is invalid, expired or revoked","error":"invalid_grant"}
+
+        Observed on a live account by letting a refresh token
+        reach its seven day expiry deliberately. Schwab does not document this
+        response, so both spellings are accepted: the standard placement, in
+        case it is ever corrected, and the nested one it actually uses.
+
+        Anything unrecognized returns False. A failure wrongly called terminal
+        stops an application which only needed to retry, which is worse than
+        one wrongly called transient.
+        '''
+        # Raised locally by authlib, before anything is sent: the stored
+        # token has no refresh token, or cannot be used as it stands. Schwab
+        # has said nothing, but the remedy is the same one and retrying is
+        # equally futile.
+        if isinstance(error, (MissingTokenError, InvalidTokenError)):
+            return True
+
+        code = getattr(error, 'error', None)
+        if code == 'invalid_grant':
+            return True
+
+        description = getattr(error, 'description', None)
+        if not isinstance(description, str):
+            return False
+
+        # The nested body is embedded in a larger string, so find the object
+        # rather than trying to parse the whole description.
+        start = description.find('{')
+        end = description.rfind('}')
+        if start < 0 or end < start:
+            return False
+
+        try:
+            nested = json.loads(description[start:end + 1])
+        except ValueError:
+            return False
+
+        return isinstance(nested, dict) and nested.get('error') == 'invalid_grant'
+
+    @contextlib.contextmanager
+    def _translate_token_errors(self):
+        '''Presents a failed token refresh as a schwab exception.
+
+        authlib raises OAuthError when Schwab rejects a refresh. That happens
+        in the middle of an ordinary request, because the session refreshes the
+        token on the way past, so an application which never touches the token
+        directly still has to catch it -- and to catch it, has to import
+        authlib and know a type this library does not document anywhere.
+
+        Only OAuthError is translated. It never comes from a data request: one
+        which fails does not raise at all, since httpx2 reports status through
+        the response. Network errors are left as the httpx2 exceptions they are,
+        because a connection failure while refreshing and one while fetching a
+        quote are the same problem and are not distinguishable from here.
+
+        Not every OAuthError comes from Schwab, though. MissingTokenError and
+        InvalidTokenError are subclasses of it which authlib raises locally,
+        before any HTTP call, when the stored token has no refresh token or is
+        otherwise unusable. Nothing about those improves with time, so they are
+        reported as needing a new login rather than as something to retry.
+
+        UnsupportedTokenTypeError is raised locally too, when the stored token
+        has no access token of a type authlib can send. It is terminal unless
+        authlib will replace that token by itself, which takes an expiry it
+        acts on -- one it reads as an int, near enough to be reached -- and a
+        refresh token to refresh with. Without both, every call fails the same
+        way and nothing is ever sent. With both, the token is refreshed as the
+        expiry nears, so it stays retryable. It is told apart by class, not by
+        its ``unsupported_token_type`` code, which Schwab uses for its own
+        rejections -- one of those has been seen to recover.
+
+        ``unusable_token_response`` does not come from Schwab either. This
+        library raises it when the token endpoint answers with something that
+        is not a usable token, so that it is refused before authlib stores it,
+        and it is reported as retryable: nothing was stored, and the next call
+        refreshes again.
+        '''
+        try:
+            yield
+        except OAuthError as e:
+            age = None
+            if self.token_metadata is not None:
+                age = self.token_metadata.token_age()
+
+            # float(): a token store such as DynamoDB returns the creation
+            # timestamp as a Decimal, and a Decimal cannot be divided by a
+            # float.
+            detail = ('The token is {:.1f} days old; Schwab documents a '
+                      'refresh token as valid for 7 days after it is '
+                      'authorized, and refreshing does not extend that.'
+                      ).format(float(age) / 86400.0) if age is not None else (
+                    'This client was built without token metadata, so the '
+                    'token\'s age is unknown.')
+
+            invalid = self._refresh_token_is_invalid(e)
+            # A token authlib cannot send, raised locally, is terminal unless
+            # authlib will replace it by itself; otherwise every call fails the
+            # same way and nothing is ever sent.
+            local = isinstance(e, (MissingTokenError, InvalidTokenError)) or (
+                    isinstance(e, UnsupportedTokenTypeError)
+                    and not self._stored_token_will_be_refreshed())
+            if local:
+                invalid = True
+                advice = ('The stored token cannot be used to refresh -- it '
+                          'has no refresh token, or is not in a usable state. '
+                          'Nothing was sent to Schwab, and retrying will not '
+                          'help: the login flow has to be completed again.')
+            elif invalid:
+                advice = ('Schwab says the refresh token is invalid, expired '
+                          'or revoked, so retrying will not help: the login '
+                          'flow has to be completed again.')
+            elif isinstance(e, UnsupportedTokenTypeError):
+                advice = ('The stored token cannot be sent as it stands, so '
+                          'nothing was sent to Schwab. It has an expiry and a '
+                          'refresh token, so it is refreshed as that expiry '
+                          'nears, and this may clear on its own.')
+            else:
+                advice = ('Schwab did not say the refresh token itself is '
+                          'invalid, so this may be transient.')
+            if not invalid and age is not None and age > 7 * 24 * 60 * 60:
+                # Still retryable: Schwab has not held exactly to its seven
+                # days, and stopping an application that could have recovered
+                # is the worse mistake. But someone should know.
+                advice += (' The token is past the seven days Schwab '
+                           'documents for a refresh token, so alert someone: '
+                           'if this keeps failing, the login flow has to be '
+                           'completed again.')
+
+            # The chained error prints the text its constructor built from the
+            # endpoint's code and description, raw, and this message repeats
+            # it; a traceback puts both in logs. Both carry that text escaped
+            # and cut, as a login's refusal does. The error keeps its class,
+            # attributes and identity, which callers classify a refresh by.
+            text = '{}: {}'.format(*_refusal_text(e))
+            e.args = (text,)
+            answered, status = _token_endpoint_answer(e)
+            raise TokenRefreshError(
+                    'Failed to refresh the Schwab token: {}. {} {}'.format(
+                        text, detail, advice),
+                    token_age=age,
+                    refresh_token_invalid=invalid,
+                    status_code=status,
+                    endpoint_answered=answered) from e
+
+    def _stored_token_will_be_refreshed(self):
+        '''Whether authlib will replace the session's token by itself. It
+        refreshes one whose expiry it acts on -- asked exactly as the check on
+        a token response asks it -- and only with a refresh token. Taken as
+        yes when the token cannot be read: calling a failure terminal wrongly
+        is the worse mistake.'''
+        try:
+            token = self.session.token
+            refresh_token = token.get('refresh_token')
+            # A refresh token authlib can send: a non-empty string, as the
+            # check on a token response requires. Anything else raises from
+            # authlib, or is sent as whatever bytes() makes of it.
+            return bool(_expiry_authlib_acts_on(token.get('expires_at'))
+                        and issubclass(type(refresh_token), str)
+                        and refresh_token)
+        except Exception:
+            return True
+
     def _assert_type(self, name, value, exp_types):
-        value_type = type(value)
-        value_type_name = '{}.{}'.format(
-            value_type.__module__, value_type.__name__)
+        # Named without trusting the value's metaclass: a class whose
+        # __name__ raises must still get the ValueError below.
+        value_type_name = _qualified_type_name(value)
         exp_type_names = ['{}.{}'.format(
             t.__module__, t.__name__) for t in exp_types]
-        if not any(isinstance(value, t) for t in exp_types):
+        if not any(_is_instance(value, t) for t in exp_types):
             if len(exp_types) == 1:
                 error_str = "expected type '{}' for {}, got '{}'".format(
                     exp_type_names[0], name, value_type_name)
@@ -82,14 +290,88 @@ class BaseClient(EnumEnforcer):
                     ', '.join(exp_type_names), name, value_type_name)
             raise ValueError(error_str)
 
+    #: Directory containing this package, used to find the first stack frame
+    #: which is not ours when attributing a warning.
+    _PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    @classmethod
+    def _caller_stacklevel(cls):
+        '''How many frames up the caller's own code is.
+
+        A fixed ``stacklevel`` cannot be right here, because the endpoints do
+        not all sit at the same depth: ``get_price_history_every_day`` calls
+        ``get_price_history``, and ``get_orders_for_account`` goes through
+        ``_make_order_query``, so those are one frame deeper than the methods
+        which format their dates directly. A warning attributed to a line
+        inside this library tells the caller nothing they can act on, so the
+        depth is counted rather than guessed.
+
+        Never returns 0. ``warnings.warn`` reads that as "blame the frame which
+        called warn", which is this library -- the exact failure this exists to
+        avoid. It would otherwise happen the first time a frame's
+        ``co_filename`` cannot be resolved under the package root, which a
+        zipimport or a frozen build can manage.
+
+        The separator matters in the prefix test: without it a sibling package
+        whose path merely starts the same way, ``.../schwabtools`` against a
+        root of ``.../schwab``, is mistaken for one of ours and skipped, and
+        the blame lands on whoever called *that*.
+
+        The count starts at 0 because ``warnings.warn`` is called one frame up,
+        by ``_warn_if_naive``, and interprets ``stacklevel`` relative to
+        itself. Counting from this frame instead would land one frame beyond
+        the caller, on whatever called *them*.
+        '''
+        frame = inspect.currentframe()
+        try:
+            level = 0
+            while frame is not None:
+                filename = os.path.abspath(frame.f_code.co_filename)
+                if not filename.startswith(cls._PACKAGE_ROOT + os.sep):
+                    return max(level, 1)
+                frame = frame.f_back
+                level += 1
+            return 1
+        finally:
+            # Frames hold references to their own locals, which includes this
+            # one. Drop it rather than leaving a cycle for the collector.
+            del frame
+
+    def _warn_if_naive(self, var_name, dt):
+        '''Warns that a datetime carrying no timezone is ambiguous.
+
+        Schwab's date parameters name an instant, and a datetime with no
+        timezone does not. Naive means ``utcoffset()`` returns ``None``,
+        Python's own definition: a ``tzinfo`` that returns no offset is naive
+        despite being set, and keying on ``tzinfo`` alone let such a value
+        pass silently and be read as the host's local time.
+
+        The two encodings resolve the ambiguity
+        differently -- the epoch-millisecond parameters read a naive datetime
+        as the host's local time, the ISO ones send its wall clock labelled as
+        UTC; a ``tzinfo`` set but returning no offset raises on the
+        millisecond path rather than being read either way -- so the same
+        code sends different requests on different machines.
+        Rather than pick one and silently reinterpret what the caller wrote,
+        say so and let them attach the timezone they meant.
+        '''
+        if _is_instance(dt, self._DATETIME) and dt.utcoffset() is None:
+            warnings.warn(
+                    ('{} was given a datetime with no timezone. Schwab\'s date '
+                     'parameters identify an instant, so the request depends on '
+                     'the timezone of the machine it is sent from. Attach one '
+                     'explicitly, for example '
+                     'datetime.datetime(..., tzinfo=datetime.timezone.utc) or '
+                     'zoneinfo.ZoneInfo(\'America/New_York\'), to get the same '
+                     'request everywhere.').format(var_name),
+                    stacklevel=self._caller_stacklevel())
+
     def _format_date_as_iso(self, var_name, dt):
-        '''Formats datetime or date objects as yyyy-MM-dd'T'HH:mm:ss.SSSZ'''
+        '''Formats datetime or date objects as yyyy-MM-dd'T'HH:mm:ssZ'''
         self._assert_type(var_name, dt, [self._DATE, self._DATETIME])
+        self._warn_if_naive(var_name, dt)
 
-        if not isinstance(dt, self._DATETIME):
-            dt = datetime.datetime(year=dt.year, month=dt.month, day=dt.day)
-
-        return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        return _format_iso_instant(dt)
 
     def _format_date_as_day(self, var_name, dt):
         '''Formats datetime or date objects as YYYY-MM-DD'''
@@ -101,7 +383,10 @@ class BaseClient(EnumEnforcer):
     def _format_date_as_millis(self, var_name, dt):
         'Converts datetime objects to compatible millisecond values'
         self._assert_type(var_name, dt, [self._DATETIME])
+        self._warn_if_naive(var_name, dt)
 
+        # timestamp() reads a naive datetime as local time, which is what
+        # _warn_if_naive is about. An aware one converts unambiguously.
         return int(dt.timestamp() * 1000)
 
 
@@ -109,11 +394,10 @@ class BaseClient(EnumEnforcer):
         '''Sets the timeout configuration for this client. Applies to all HTTP 
         calls.
 
-        :param timeout: ``httpx`` timeout configuration. Passed directly to 
-                        underlying ``httpx`` library. See
-                        `here <https://www.python-httpx.org/advanced/
-                        #setting-a-default-timeout-on-a-client>`__ for
-                        examples.'''
+        :param timeout: ``httpx2`` timeout configuration. Passed directly to
+                        underlying ``httpx2`` library. See
+                        `here <https://github.com/pydantic/httpx2/blob/main/
+                        docs/advanced/timeouts.md>`__ for examples.'''
         self.session.timeout = timeout
 
     def token_age(self):
@@ -153,9 +437,12 @@ class BaseClient(EnumEnforcer):
 
     def get_account_numbers(self):
         '''
-        Returns a mapping from account IDs available to this token to the 
-        account hash that should be passed whenever referring to that account in 
-        API calls.
+        Fetches the accounts this token can use. The response's JSON body is a
+        list pairing each ``accountNumber`` with the ``hashValue`` to pass
+        whenever referring to that account in API calls. Schwab documents no
+        order for the list, so
+        use :func:`~schwab.utils.find_account_hash` to find the hash for a
+        number rather than taking the first entry.
         '''
         path = '/trader/v1/accounts/accountNumbers'
         return self._get_request(path, {})
@@ -217,6 +504,39 @@ class BaseClient(EnumEnforcer):
             PENDING_RECALL = 'PENDING_RECALL'
             UNKNOWN = 'UNKNOWN'
 
+        #: The ``Status`` values after which an order's ``status`` stops
+        #: changing.
+        #:
+        #: Values, not members. ``Status`` is a plain ``Enum``, so
+        #: ``Status.FILLED == 'FILLED'`` is False, and a set of members would
+        #: report the raw string a REST response carries in
+        #: ``order['status']`` as not terminal -- silently, with no error.
+        #: These are that string, derived from the members so the two
+        #: cannot drift apart.
+        #:
+        #: Schwab's documentation lists every status and never says which are
+        #: terminal, so this is a reading rather than a contract. ``FILLED``,
+        #: ``CANCELED`` and ``REJECTED`` have been observed ending an order,
+        #: and ``REPLACED`` ending each id a price change retired --- five of
+        #: five, on one option order; no equity order's replacement has been
+        #: captured.
+        #: ``EXPIRED`` is :ref:`Unconfirmed <confidence_tags>`: included by
+        #: reading, and never captured.
+        #:
+        #: ``REPLACED`` is terminal for *that order id*. The order continues
+        #: under a new id, so anything tracking the old one sees it end while
+        #: the work goes on --- and no key captured on the retired order names
+        #: its successor. The link is on the stream; see
+        #: :ref:`price changes <account_activity_price_change>`.
+        #:
+        #: This describes the REST ``status`` field. The ``MESSAGE_TYPE``
+        #: tokens on ``ACCT_ACTIVITY`` are a different vocabulary and do not
+        #: map onto these one for one: the same token ends both a cancel and
+        #: a rejection.
+        TERMINAL_STATUSES = frozenset(status.value for status in (
+            Status.FILLED, Status.REJECTED, Status.CANCELED,
+            Status.EXPIRED, Status.REPLACED))
+
     def _make_order_query(self,
                           *,
                           max_results=None,
@@ -266,9 +586,11 @@ class BaseClient(EnumEnforcer):
                                     time should be returned. ``fromEnteredTime``
                                     must also be set.
         :param status: Restrict query to orders with this status. See
-                       :class:`Order.Status` for options.
-        :param statuses: Restrict query to orders with any of these statuses.
-                         See :class:`Order.Status` for options.
+                       :class:`Order.Status` for options. Schwab accepts only
+                       one, so passing a collection raises ``ValueError`` --
+                       unless the client was built with ``enforce_enums=False``,
+                       which turns off that check along with every other one
+                       and forwards whatever it is given.
         '''
         path = '/trader/v1/accounts/{}/orders'.format(account_hash)
         return self._get_request(path, self._make_order_query(
@@ -295,7 +617,11 @@ class BaseClient(EnumEnforcer):
                                     time should be returned. ``fromEnteredTime``
                                     must also be set.
         :param status: Restrict query to orders with this status. See
-                       :class:`Order.Status` for options.
+                       :class:`Order.Status` for options. Schwab accepts only
+                       one, so passing a collection raises ``ValueError`` --
+                       unless the client was built with ``enforce_enums=False``,
+                       which turns off that check along with every other one
+                       and forwards whatever it is given.
         '''
         path = '/trader/v1/orders'
         return self._get_request(path, self._make_order_query(
@@ -318,9 +644,10 @@ class BaseClient(EnumEnforcer):
         return self._post_request(path, order_spec)
 
     def replace_order(self, account_hash, order_id, order_spec):
-        '''Replace an existing order for an account. The existing order will be
-        replaced by the new order. Once replaced, the old order will be canceled
-        and a new order will be created.'''
+        '''Replace an existing order for an account. The existing order stops
+        working and a new order, with a new ID, takes its place. The old ID
+        does not carry over, and what it reads afterwards is not necessarily
+        ``CANCELED``.'''
         if isinstance(order_spec, OrderBuilder):
             order_spec = order_spec.build()
 
@@ -463,7 +790,9 @@ class BaseClient(EnumEnforcer):
 
         :param symbol: Single symbol to fetch
         :param fields: Fields to request. If unset, return all available data. 
-                       i.e. all fields. See :class:`GetQuote.Field` for options.
+                       i.e. all fields. See
+                       :class:`Client.Quote.Fields
+                       <schwab.client.Client.Quote.Fields>` for options.
         '''
         fields = self.convert_enum_iterable(fields, self.Quote.Fields)
         if fields:
@@ -480,9 +809,11 @@ class BaseClient(EnumEnforcer):
 
         :param symbols: Iterable of symbols to fetch.
         :param fields: Fields to request. If unset, return all available data. 
-                       i.e. all fields. See :class:`GetQuote.Field` for options.
+                       i.e. all fields. See
+                       :class:`Client.Quote.Fields
+                       <schwab.client.Client.Quote.Fields>` for options.
         '''
-        if isinstance(symbols, str):
+        if _is_instance(symbols, str):
             symbols = [symbols]
 
         params = {
@@ -670,8 +1001,15 @@ class BaseClient(EnumEnforcer):
     # Option Expiration Chain
 
     def get_option_expiration_chain(self, symbol):
-        '''Preferences for the logged in account, including all linked
-        accounts.'''
+        '''Returns the expiration dates available for options on ``symbol``,
+        with the type and settlement of each.
+
+        Cheaper than :meth:`get_option_chain` when you only need to know *when*
+        contracts expire rather than what they cost, because it returns the
+        expiration list alone rather than every strike at every date.
+
+        :param symbol: Underlying symbol, e.g. ``AAPL``.
+        '''
         path = '/marketdata/v1/expirationchain'
         return self._get_request(path, {'symbol': symbol})
 
@@ -746,8 +1084,17 @@ class BaseClient(EnumEnforcer):
         '''Get price history for a symbol.
 
         :param period_type: The type of period to show.
-        :param period: The number of periods to show. Should not be provided if
-                       ``start_datetime`` and ``end_datetime``.
+        :param period: The number of periods to show. Schwab uses this only to
+                       derive a start date when ``start_datetime`` is not given
+                       -- its documentation says "if not specified startDate
+                       will be (endDate - period)". Supplying both is
+                       harmless, since ``start_datetime`` is what takes effect,
+                       but the period is then doing nothing.
+
+                       Valid values depend on ``period_type``: ``DAY`` accepts
+                       1, 2, 3, 4, 5 and 10; ``MONTH`` accepts 1, 2, 3 and 6;
+                       ``YEAR`` accepts 1, 2, 3, 5, 10, 15 and 20; ``YEAR_TO_DATE``
+                       accepts 1.
         :param frequency_type: The type of frequency with which a new candle
                                is formed.
         :param frequency: The number of the frequencyType to be included in each
@@ -790,7 +1137,7 @@ class BaseClient(EnumEnforcer):
         if need_previous_close is not None:
             params['needPreviousClose'] = need_previous_close
 
-        path = '/marketdata/v1/pricehistory'.format(symbol)
+        path = '/marketdata/v1/pricehistory'
         return self._get_request(path, params)
 
 
@@ -798,13 +1145,38 @@ class BaseClient(EnumEnforcer):
     # Price history utilities
 
     def __normalize_start_and_end_datetimes(self, start_datetime, end_datetime):
+        '''
+        Fills in whichever end of the range the caller left out, and reports
+        whether they asked for a range at all.
+
+        The third return value decides whether ``period`` is sent. Schwab
+        honours ``period`` and ignores the date range when both are present, so
+        a caller who gives a range and still gets a period's worth of data has
+        been quietly ignored. When no range is asked for, the synthesized one
+        spans decades and is not something to request, so ``period`` is what
+        should describe the request instead.
+        '''
+        requested_range = (start_datetime is not None
+                           or end_datetime is not None)
+
         if start_datetime is None:
-            start_datetime = datetime.datetime(year=1971, month=1, day=1)
+            # Explicitly UTC. A naive default would warn the caller about a
+            # datetime they never passed -- every call which omits the dates,
+            # which is most of them -- and would put the epoch millis this
+            # turns into at the mercy of the host's offset, which is the same
+            # defect the end_datetime default was changed to avoid.
+            start_datetime = datetime.datetime(
+                    year=1971, month=1, day=1, tzinfo=datetime.timezone.utc)
         if end_datetime is None:
-            end_datetime = (datetime.datetime.utcnow() +
+            # utcnow() is deprecated, and returns a naive datetime holding a UTC
+            # wall time. _format_date_as_millis converts with dt.timestamp(),
+            # which reads a naive datetime as local time, so the result was off
+            # by the host's UTC offset. An aware datetime converts correctly.
+            # _make_order_query already does it this way.
+            end_datetime = (datetime.datetime.now(datetime.timezone.utc) +
                     datetime.timedelta(days=7))
 
-        return start_datetime, end_datetime
+        return start_datetime, end_datetime, requested_range
 
 
     def get_price_history_every_minute(
@@ -816,13 +1188,15 @@ class BaseClient(EnumEnforcer):
         data.
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.DAY,
-                period=self.PriceHistory.Period.ONE_DAY,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.ONE_DAY),
                 frequency_type=self.PriceHistory.FrequencyType.MINUTE,
                 frequency=self.PriceHistory.Frequency.EVERY_MINUTE,
                 start_datetime=start_datetime,
@@ -840,13 +1214,15 @@ class BaseClient(EnumEnforcer):
         nine months of data.
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.DAY,
-                period=self.PriceHistory.Period.ONE_DAY,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.ONE_DAY),
                 frequency_type=self.PriceHistory.FrequencyType.MINUTE,
                 frequency=self.PriceHistory.Frequency.EVERY_FIVE_MINUTES,
                 start_datetime=start_datetime,
@@ -864,13 +1240,15 @@ class BaseClient(EnumEnforcer):
         nine months of data.
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.DAY,
-                period=self.PriceHistory.Period.ONE_DAY,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.ONE_DAY),
                 frequency_type=self.PriceHistory.FrequencyType.MINUTE,
                 frequency=self.PriceHistory.Frequency.EVERY_TEN_MINUTES,
                 start_datetime=start_datetime,
@@ -888,13 +1266,15 @@ class BaseClient(EnumEnforcer):
         nine months of data.
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.DAY,
-                period=self.PriceHistory.Period.ONE_DAY,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.ONE_DAY),
                 frequency_type=self.PriceHistory.FrequencyType.MINUTE,
                 frequency=self.PriceHistory.Frequency.EVERY_FIFTEEN_MINUTES,
                 start_datetime=start_datetime,
@@ -912,13 +1292,15 @@ class BaseClient(EnumEnforcer):
         nine months of data.
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.DAY,
-                period=self.PriceHistory.Period.ONE_DAY,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.ONE_DAY),
                 frequency_type=self.PriceHistory.FrequencyType.MINUTE,
                 frequency=self.PriceHistory.Frequency.EVERY_THIRTY_MINUTES,
                 start_datetime=start_datetime,
@@ -937,13 +1319,15 @@ class BaseClient(EnumEnforcer):
         1985 (for ``AAPL``).
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.YEAR,
-                period=self.PriceHistory.Period.TWENTY_YEARS,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.TWENTY_YEARS),
                 frequency_type=self.PriceHistory.FrequencyType.DAILY,
                 frequency=self.PriceHistory.Frequency.EVERY_MINUTE,
                 start_datetime=start_datetime,
@@ -962,13 +1346,15 @@ class BaseClient(EnumEnforcer):
         1985 (for ``AAPL``).
         '''
 
-        start_datetime, end_datetime = self.__normalize_start_and_end_datetimes(
-                start_datetime, end_datetime)
+        start_datetime, end_datetime, requested_range = \
+                self.__normalize_start_and_end_datetimes(
+                        start_datetime, end_datetime)
 
         return self.get_price_history(
                 symbol,
                 period_type=self.PriceHistory.PeriodType.YEAR,
-                period=self.PriceHistory.Period.TWENTY_YEARS,
+                period=(None if requested_range
+                        else self.PriceHistory.Period.TWENTY_YEARS),
                 frequency_type=self.PriceHistory.FrequencyType.WEEKLY,
                 frequency=self.PriceHistory.Frequency.EVERY_MINUTE,
                 start_datetime=start_datetime,
@@ -1014,12 +1400,66 @@ class BaseClient(EnumEnforcer):
     def get_movers(self, index, *, sort_order=None, frequency=None):
         '''Get a list of the top ten movers for a given index.
 
-        :param index: Category of mover. See :class:`Movers.Index` for valid 
+        .. warning::
+
+          **Schwab ignores** ``sort_order`` **and** ``frequency`` **on this
+          endpoint.** Both are sent --- they appear in the request URL --- and
+          the response is identical whichever values you pass: always the top
+          ten by *share* volume, always for the whole session.
+          ``PERCENT_CHANGE_DOWN`` does not invert the ranking, and rows come
+          back monotonically descending in ``volume`` while
+          ``netPercentChange`` is unordered. Measured against a live account
+          by polling eleven indices every five minutes for a whole session:
+          two different ``sort`` values returned identical lists in all 495
+          index-cycles.
+
+          The streaming screener does honour both. If you need a ranking other
+          than volume, or a time-resolved bucket, use
+          :meth:`~schwab.streaming.StreamClient.screener_equity_subs`; a
+          subscription at frequency ``0`` reproduces this endpoint's output.
+          See :ref:`screener`.
+
+        Two fields in the response are easy to misread, and Schwab's own
+        documentation does not describe them accurately:
+
+        * ``totalVolume`` is the **index** total, not the instrument's. It is
+          identical on every row of a response --- in all 990 responses of the
+          session above, without exception. Summing it across rows sums the
+          same number ten times.
+        * ``marketShare`` is derived, not measured: ``volume / totalVolume *
+          100`` exactly. Because it is relative to the index queried, the same
+          instrument reports a different ``marketShare`` under ``OPTION_ALL``
+          than under ``OPTION_PUT`` while its ``volume`` is unchanged.
+
+        ``volume`` is the instrument's own share volume, and ``trades`` its
+        own trade count.
+
+        Two things about the values themselves, from the same session:
+
+        * **The membership barely moves.** Across four hours of five-minute
+          polls, the median change between consecutive polls was zero names
+          and the maximum was one, with only twelve or thirteen distinct
+          symbols appearing all session. That follows from ranking on
+          cumulative session volume, which only grows. Polling this endpoint
+          frequently gets you the same list.
+        * ``INDEX_ALL`` **does not return indices.** It returns equities, it
+          is not the same set as ``EQUITY_ALL``, and none of its members
+          appeared in the ``NYSE`` list at any point while eight or nine of
+          ten appeared in ``NASDAQ``. What it actually selects is not
+          documented and has not been established here.
+
+        :param index: Category of mover. See :class:`Movers.Index` for valid
                       values.
-        :param sort_order: Order in which to return values. See 
-                           :class:`Movers.SortOrder for valid values`
-        :param frequency: Only return movers that saw this magnitude or greater. 
-                          See :class:`Movers.Frequency` for valid values.
+        :param sort_order: Requested ranking. See :class:`Movers.SortOrder`
+                           for valid values. **Ignored by Schwab** --- see the
+                           warning above.
+        :param frequency: Requested time bucket, in minutes, ``0`` meaning the
+                          whole session. See :class:`Movers.Frequency` for
+                          valid values. **Ignored by Schwab** --- see the
+                          warning above. (It is a bucket, not a threshold; an
+                          earlier version of this docstring described it as
+                          "movers that saw this magnitude or greater", which
+                          it never was.)
         '''
         index = self.convert_enum(index, self.Movers.Index)
         sort_order = self.convert_enum(sort_order, self.Movers.SortOrder)
@@ -1082,9 +1522,9 @@ class BaseClient(EnumEnforcer):
         to get fundamental instrument data by use of the ``FUNDAMENTAL`` 
         projection.
 
-        :param symbol: For ``FUNDAMENTAL`` projection, the symbol for which to 
-                       get fundamentals. For other projections, a search term. 
-                       See below for details.
+        :param symbols: For ``FUNDAMENTAL`` projection, the symbol for which
+                        to get fundamentals. For other projections, a search
+                        term. See below for details.
         :param projection: Search mode, or ``FUNDAMENTAL`` for instrument 
                            fundamentals. See :class:`Instrument.Projection`.
 
@@ -1119,7 +1559,7 @@ class BaseClient(EnumEnforcer):
              - String, or array of strings
              - Symbols for which to return fundamentals. Exact match.
         '''
-        if isinstance(symbols, str):
+        if _is_instance(symbols, str):
             symbols = [symbols]
 
         projection = self.convert_enum(projection, self.Instrument.Projection)
@@ -1138,7 +1578,7 @@ class BaseClient(EnumEnforcer):
         :param cusip: String representing CUSIP of instrument for which to fetch 
                       data. Note leading zeroes must be preserved.
         '''
-        if not isinstance(cusip, str):
+        if not _is_instance(cusip, str):
             raise ValueError('cusip must be passed as str')
 
         return self._get_request(

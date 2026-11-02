@@ -7,17 +7,19 @@ assignees: ''
 
 ---
 
-## Please read the [bug submission guidelines](https://tda-api.readthedocs.io/en/latest/help.html) before submitting a bug.
+<!--
+Please read the bug submission guidelines before filing:
+https://github.com/neusse/Schwab-py-NG/blob/main/docs/help.rst
 
-Not following guidelines may result in your bug being ignored and/or closed. 
+IMPORTANT: anonymize everything you paste. Replace API keys and app secrets with
+placeholders, and never share the contents of your token file.
+-->
 
 **Description of Bug**
 <DESCRIPTION>
 
 **Code to Reproduce**
-Paste in the code that causes the bug to occur. 
-
-IMPORTANT: Remember to anonymize your code. Be sure to replace API keys/Client IDs with placeholders. Also, never, ever share the contents of your token file. 
+Paste in the code that causes the bug to occur.
 
 **Expected Behavior**
 <EXPECTED BEHAVIOR>
@@ -25,5 +27,12 @@ IMPORTANT: Remember to anonymize your code. Be sure to replace API keys/Client I
 **Actual Behavior**
 <ACTUAL BEHAVIOR>
 
+**Version and Environment**
+ - `schwab` version (`print(schwab.version.version)`):
+ - Python version:
+ - OS and how you run your code (terminal, notebook, container, IDE):
+
 **Error/Exception Log, If Applicable**
-See here to learn how to turn on debug logging: https://tda-api.readthedocs.io/en/latest/help.html
+Attach logs as a file rather than pasting them inline, and check them for
+secrets first. See here for how to enable debug logging:
+https://github.com/neusse/Schwab-py-NG/blob/main/docs/help.rst

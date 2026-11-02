@@ -96,6 +96,16 @@ celerybeat-schedule
 # SageMath parsed files
 *.sage.py
 
+# Credentials
+#
+# The token file grants full access to the account it was issued for: it can
+# read balances and positions and place trades. Anyone who develops against a
+# checkout will create one, and the default name is predictable, so keep git
+# from ever offering to commit it.
+token.json
+*token.json
+*.token.json
+
 # Environments
 .env
 .venv
@@ -148,3 +158,8 @@ tags
 virtualenv
 
 docs-build/
+
+# Interpreters provisioned by uv for this checkout alone (UV_PYTHON_INSTALL_DIR):
+# a shared install directory re-points its minor-version links, which moves
+# every other project's virtualenv built through them.
+/.uv-python/

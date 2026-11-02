@@ -2,10 +2,118 @@ from colorama import Fore, Back, Style, init
 from unittest.mock import AsyncMock, MagicMock
 
 import asyncio
+import contextlib
 import difflib
 import inspect
-import httpx
+import httpx2
 import json
+import os
+import socket
+
+
+#: Every port free_callback_port and bound_callback_socket have handed out in
+#: this process. A login flow given a loopback port that is not here was
+#: given one written down, and tests/conftest.py fails the test saying so: a
+#: scan of the source for port numbers misses `port = 6969` a line above the
+#: URL that uses it.
+HANDED_OUT_PORTS = set()
+
+
+def free_callback_port():
+    '''A loopback port nothing is listening on, for a login-flow test's
+    callback URL: a fixed one (6969) made any two runs of the suite on one
+    machine fail each other. The port is free when this returns and the flow
+    binds it a moment later, so another process could take it between the
+    two; a test that is not about the flow binding its port serves on
+    bound_callback_socket() instead, which leaves no such gap. With a port of
+    its own, a login-flow test needs no worker or run to itself: two flows
+    side by side no longer take each other's server for their own.'''
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        port = s.getsockname()[1]
+    HANDED_OUT_PORTS.add(port)
+    return port
+
+
+@contextlib.contextmanager
+def naming_a_port_taken_between_pick_and_bind(test, port):
+    '''For the tests of a login flow binding a port by number, which have to
+    pick a free one and let it go first. If the flow's server exits and the
+    port turns out to be held by something else, that is a collision in the
+    gap between the pick and the bind, and the test fails saying so rather
+    than as a failure of the flow. A port nobody holds lets the error through
+    as it was.'''
+    from schwab.auth import RedirectServerExitedError
+    try:
+        yield
+    except RedirectServerExitedError:
+        if _a_child_holds(port):
+            # The flow's own server, outliving the flow: a defect of the
+            # flow, which must not read as a collision.
+            raise
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # A port left in TIME_WAIT by the test's own requests is not
+            # held. Not on Windows, where the option lets a bind take a port
+            # someone is listening on.
+            if os.name != 'nt':
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(('127.0.0.1', port))
+            except OSError:
+                test.fail('port taken between pick and bind: something else '
+                          'held port {} when the callback server tried to '
+                          'bind it, so this is a collision, not a failure '
+                          'of the login flow'.format(port))
+        raise
+
+
+def _a_child_holds(port):
+    '''Whether a process this one started holds ``port``. A child that
+    cannot be read is taken as not holding it.'''
+    import psutil
+    try:
+        children = psutil.Process().children(recursive=True)
+    except psutil.Error:
+        return False
+    for child in children:
+        try:
+            # net_connections from psutil 6.0, connections before it.
+            connections = getattr(child, 'net_connections',
+                                  getattr(child, 'connections', None))(
+                                          kind='tcp')
+        except psutil.Error:
+            continue
+        if any(c.laddr and c.laddr.port == port for c in connections):
+            return True
+    return False
+
+
+def bound_callback_socket():
+    '''A loopback socket bound to a port of its own, held from the moment the
+    port is chosen, for a login flow to serve on as its ``callback_socket``.
+    Bound and not listening: the flow puts it in the listening state.'''
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(('127.0.0.1', 0))
+    HANDED_OUT_PORTS.add(s.getsockname()[1])
+    return s
+
+
+def bound_datagram_socket():
+    '''A loopback UDP socket on a port of its own, handed out like
+    bound_callback_socket()'s: for a test that offers a login flow a socket
+    of the wrong type, on the port its callback URL names. Bound to a port
+    the host chooses for UDP, rather than a TCP port's number, which a host
+    may refuse for UDP (Windows: WinError 10013).'''
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(('127.0.0.1', 0))
+    HANDED_OUT_PORTS.add(s.getsockname()[1])
+    return s
+
+
+# Resolved from this file rather than the working directory. Every test that
+# loads it used to require pytest to be run from the repo root, and running
+# from anywhere else failed 164 tests on a FileNotFoundError in setUp.
+TESTDATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'testdata')
 
 class AnyStringWith(str):
     '''
@@ -16,7 +124,7 @@ class AnyStringWith(str):
         return self in other
 
 def account_preferences():
-    with open('tests/testdata/preferences.json', 'r') as f:
+    with open(os.path.join(TESTDATA, 'preferences.json'), 'r') as f:
         return json.load(f)
 
 
@@ -120,9 +228,9 @@ class ResyncProxy:
         return getattr(self.cls, key)
 
 
-# TODO: Figure out if httpx supports cleaner response mocking, because this is 
+# TODO: Figure out if httpx2 supports cleaner response mocking, because this is
 #       pretty janky.
-class MockResponse(httpx.Response):
+class MockResponse(httpx2.Response):
     def __init__(self, json, status_code, headers=None):
         resp_args = {
             'status_code': status_code,
@@ -130,7 +238,7 @@ class MockResponse(httpx.Response):
         }
         if headers:
             resp_args['headers'] = headers
-        httpx.Response.__init__(
+        httpx2.Response.__init__(
                 self, **resp_args)
 
 
@@ -169,13 +277,18 @@ class AsyncMagicMock:
         self.__attr_cache.clear()
 
 def has_diff(old, new):
+    '''False when old and new are the same JSON. When they differ it raises
+    AssertionError carrying the diff, so the difference is in the failure
+    itself: it used to be printed to the test's captured output, and the
+    failure said only "True is not false". Every caller asserts it False.'''
     old_out = json.dumps(old, indent=4, sort_keys=True).splitlines()
     new_out = json.dumps(new, indent=4, sort_keys=True).splitlines()
-    diff = difflib.ndiff(old_out, new_out)
-    diff, has_diff = color_diff(diff)
+    diff = list(difflib.ndiff(old_out, new_out))
+    _, has_diff = color_diff(diff)
 
     if has_diff:
-        print('\n'.join(diff))
+        raise AssertionError('the JSON differs:\n' + '\n'.join(
+            line for line in diff if not line.startswith('?')))
     return has_diff
 
 
@@ -211,12 +324,14 @@ def no_duplicates(f):
 class MockOAuthClient(MagicMock):
     def __call__(self, *args, **kwargs):
         if 'update_token' in kwargs:
-            assert not inspect.iscoroutinefunction(kwargs['update_token'])
+            assert not inspect.iscoroutinefunction(kwargs['update_token']), (
+                'a sync OAuth client was handed a coroutine token writer')
         return MagicMock.__call__(self, *args, **kwargs)
 
 
 class MockAsyncOAuthClient(MagicMock):
     def __call__(self, *args, **kwargs):
         if 'update_token' in kwargs:
-            assert inspect.iscoroutinefunction(kwargs['update_token'])
+            assert inspect.iscoroutinefunction(kwargs['update_token']), (
+                'an async OAuth client was handed a plain token writer')
         return MagicMock.__call__(self, *args, **kwargs)

@@ -1,0 +1,171 @@
+# Publishes to PyPI on a GitHub Release, using trusted publishing.
+#
+# There is no API token anywhere in this repository or in its secrets. GitHub
+# mints a short-lived OIDC token for this workflow and PyPI verifies it against
+# the publisher you configured, so there is no long-lived credential to leak,
+# rotate or forget. That is the whole reason `id-token: write` is here.
+#
+# It runs on a published Release rather than on a tag push, so pushing a tag by
+# itself never publishes. Creating the release is the deliberate act.
+name: publish
+run-name: publish ${{ github.ref_name }}
+
+on:
+  release:
+    types: [published]
+  # Lets a failed publish be retried without cutting another release. Run it
+  # on the release's tag (gh workflow run publish --ref vX.Y.Z): the run's
+  # commit is then the tag's, which every checkout below builds, and the
+  # pypi environment deploys only from a v* tag. Run from a branch, it would
+  # build that branch's tip, newer code under the same version, and an upload
+  # to PyPI cannot be taken back.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The tests run again here rather than trusting the run on the commit. A
+  # release can be created from a tag whose test run is old, was skipped, or
+  # passed before a force-push -- and "it was green earlier" is not the same
+  # claim as "it is green now".
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      # The exact build .python-versions pins for this minor version, which
+      # uv downloads and checks the hash of: the build every machine that
+      # runs this suite runs. A minor version with no pin fails here, by name.
+      - name: Pinned Python ${{ matrix.python }}
+        id: pin
+        shell: bash
+        run: |
+          version=$(tr -d '\r' < .python-versions | grep -E "^${MINOR//./\\.}\.[0-9]+$") || {
+            echo "no pin for $MINOR in .python-versions"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          MINOR: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0: setup-uv publishes no floating major tag
+        with:
+          version: "0.13.4"
+          python-version: ${{ steps.pin.outputs.version }}
+          activate-environment: true
+      - name: The interpreter is the pinned build
+        shell: bash
+        run: >-
+          python -c "import platform, sys; v = platform.python_version();
+          sys.exit(0 if v == sys.argv[1] else 'running %s, pinned %s' % (v, sys.argv[1]))"
+          ${{ steps.pin.outputs.version }}
+      - run: uv pip install -c requirements.lock ".[dev]"
+      - run: pytest tests/ -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      # Only a published release's tag is published, whichever way the run
+      # was started: a retry from a branch, or on a tag whose release was
+      # never published, stops here.
+      - name: The run is a published release's tag
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "$GITHUB_REF is not a release tag: run it with --ref vX.Y.Z"
+               exit 1 ;;
+          esac
+          draft=$(gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+                  --json isDraft -q .isDraft) || draft=missing
+          test "$draft" = false || {
+            echo "$GITHUB_REF_NAME has no published release"; exit 1; }
+        env:
+          GH_TOKEN: ${{ github.token }}
+      # No ref: the run's own commit, so a release whose tag was moved after
+      # it started fails here rather than building the new commit.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # A release is cut only from a commit main holds. One created from a tag
+      # on a branch that was never merged would publish code that never
+      # reached main.
+      - name: The release commit is on main
+        shell: bash
+        run: |
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD FETCH_HEAD || {
+            echo "$(git rev-parse HEAD) is not on main"; exit 1; }
+      - name: Pinned Python "3.12"
+        id: pin
+        shell: bash
+        run: |
+          version=$(tr -d '\r' < .python-versions | grep -E "^${MINOR//./\\.}\.[0-9]+$") || {
+            echo "no pin for $MINOR in .python-versions"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          MINOR: "3.12"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0: setup-uv publishes no floating major tag
+        with:
+          version: "0.13.4"
+          python-version: ${{ steps.pin.outputs.version }}
+          activate-environment: true
+      - name: The interpreter is the pinned build
+        shell: bash
+        run: >-
+          python -c "import platform, sys; v = platform.python_version();
+          sys.exit(0 if v == sys.argv[1] else 'running %s, pinned %s' % (v, sys.argv[1]))"
+          ${{ steps.pin.outputs.version }}
+      # readme_renderer[md] is not optional. Measured: with a markdown
+      # long_description and without that extra, `twine check --strict` prints
+      # PASSED for both artifacts having rendered nothing -- it warns on import
+      # and moves on. So the gate does not fail loudly when it stops working,
+      # it just stops working.
+      - run: uv pip install -c requirements.lock build twine "readme_renderer[md]"
+      - run: python -m build
+
+      # twine check verifies the long_description renders at all. Note it is a
+      # much weaker gate for markdown than it was for rst: measured, it rejects
+      # only an empty or whitespace-only document, where rst also rejected
+      # malformed markup. The real check is the suite's
+      # test_the_readme_renders_to_a_real_page, which asserts the rendered HTML
+      # is substantial and contains what a PyPI page has to carry. Both run.
+      - run: python -m twine check --strict dist/*
+
+      # The version in the artifact must match the tag being released, on a
+      # release and a retry alike. Publishing 2.5.1 from a tag called v2.6.0
+      # is not recoverable: PyPI refuses re-uploads of a version, so the
+      # wrong number is permanent.
+      - name: Version must match the tag
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          built=$(ls dist/*.tar.gz | sed -E 's/.*schwab_py_ng-(.*)\.tar\.gz/\1/')
+          echo "tag=$tag built=$built"
+          test -n "$tag" && test "$tag" = "$built"
+
+      # upload-artifact and download-artifact are versioned separately and
+      # their majors are offset by one from v5 onward -- download picked up an
+      # extra breaking change that upload did not. The pair that goes together
+      # is the one released on the same day: upload v7 with download v8. Bump
+      # both or neither. Dependabot opens a pull request per action and will
+      # happily offer you half of this.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write        # required for trusted publishing; nothing else
+    steps:
+      - uses: actions/download-artifact@v8   # pairs with upload v7 above
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

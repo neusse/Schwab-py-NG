@@ -1,11 +1,21 @@
-# Note this requirements file is only used by sphinx. For regular installations, 
+# Note this requirements file is only used by sphinx. For regular installations,
 # see the setup.py file.
-authlib==1.3.0
-Flask==3.0.3
-httpx==0.27.0
-multiprocess==0.70.16
-prompt_toolkit==3.0.43
-psutil==5.9.8
-python-dateutil==2.9.0.post0
-sphinx-rtd-theme==2.0.0
-websockets==12.0
+#
+# These are floors rather than pins. Sphinx imports the library to read its
+# docstrings, so whatever is installed here has to satisfy setup.py as well.
+# A pin drifts out of agreement with setup.py silently: nothing fails until the
+# documentation build imports something which is not there.
+#
+# This is the subset of setup.py's install_requires that sphinx has to import,
+# not all of it. `flask`, `multiprocess` and `psutil` became hard dependencies
+# again in 3.0.0 and are deliberately still absent: they are imported inside
+# the functions that use them, so autodoc reads those docstrings without the
+# packages present.
+#
+# That makes this file a check on those imports staying function-local. Move
+# one to module scope and the documentation build is where it fails, with
+# nothing else to say why -- so if you do move one, add it here.
+authlib>=1.8
+httpx2>=2.12.0
+websockets>=14.0
+sphinx-rtd-theme>=2.0.0
