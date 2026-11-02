@@ -1,12 +1,18 @@
 <div align="center">
 
+<img src="docs/assets/schwab-py-ng-banner.svg" alt="Schwab-py-NG — hardened Python access to the Charles Schwab API" width="100%">
+
 # Schwab-py-NG
 
-**A Python client for the Charles Schwab API, built for code that trades real money.**
+**Hardened Python access to the Charles Schwab API, built for code that trades real money.**
 
-[![tests](https://github.com/neusse/Schwab-py-NG/workflows/tests/badge.svg)](https://github.com/neusse/Schwab-py-NG/actions?query=workflow%3Atests)
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](setup.py)
+[![Tests](https://github.com/neusse/Schwab-py-NG/actions/workflows/python.yml/badge.svg)](https://github.com/neusse/Schwab-py-NG/actions/workflows/python.yml)
+[![Version](https://img.shields.io/badge/version-5.2.0-0ea5e9.svg)](CHANGELOG.md)
+[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-3776ab.svg?logo=python&logoColor=white)](setup.py)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-14b8a6.svg)](#support-matrix)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[Install](#installing) · [Quick start](#sixty-seconds-in) · [Capabilities](#what-it-covers) · [Documentation](docs/index.rst) · [Contributing](docs/contributing.rst)
 
 </div>
 
@@ -27,7 +33,20 @@ into this:
 {'key': 'AAPL', 'BID_PRICE': 421.55, 'ASK_PRICE': 421.60, 'LAST_PRICE': 421.58}
 ```
 
-Synchronous and `asyncio` over the same interface. Python 3.10+.
+Synchronous and `asyncio` over the same interface. Python 3.10–3.14 on
+Windows and Linux.
+
+## Project status
+
+Schwab-py-NG currently identifies as version 5.2.0. It keeps the established
+`schwab` import namespace while consolidating the strongest maintained fixes
+from the forks reviewed in [INTEGRATION.md](INTEGRATION.md). The full suite
+contains more than 1,300 tests, and every push is checked against Python
+3.10–3.14. Pull requests, tags, and manually dispatched CI runs additionally
+exercise Windows.
+
+This repository is the install source for now; Schwab-py-NG has not been
+published to PyPI. Install it directly from GitHub as shown above.
 
 ---
 
@@ -263,6 +282,19 @@ import schwab
 
 `schwab-py-ng` and `schwab-py` both install the `schwab` import package and
 must not share an environment. Uninstall `schwab-py` before installing NG.
+
+### Support matrix
+
+| Component | Supported |
+|---|---|
+| Python | 3.10, 3.11, 3.12, 3.13, 3.14 |
+| Operating systems | Windows and Linux |
+| API styles | Synchronous and `asyncio` |
+| Package source | GitHub (`main`) |
+
+macOS is not a project target. It may work, but it is not part of the tested
+support contract. See [INTEGRATION.md](INTEGRATION.md) for the platform decision
+and the exact upstream revisions reviewed.
 
 ---
 
