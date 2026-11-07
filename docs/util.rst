@@ -346,3 +346,7 @@ needs, and is not repeated here.
 .. autoclass:: schwab.auth.RedirectTimeoutError
 
 .. autoclass:: schwab.auth.RedirectServerExitedError
+
+.. autoclass:: schwab.auth.UnsafeCallbackPortError
+
+.. autoclass:: schwab.auth.BrowserLaunchError

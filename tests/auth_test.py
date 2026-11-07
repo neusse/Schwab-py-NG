@@ -347,6 +347,62 @@ class ClientFromLoginFlowTest(unittest.TestCase):
         mock_prompt.assert_not_called()
 
 
+    @patch('schwab.auth.OAuth2Client', new_callable=MockOAuthClient)
+    @patch('schwab.auth.webbrowser.get', new_callable=MagicMock)
+    def test_missing_browser_raises_browser_launch_error(
+            self, mock_webbrowser_get, sync_session):
+        sync_session.return_value = sync_session
+        sync_session.create_authorization_url.return_value = (
+                'https://auth.url.com', 'state')
+        mock_webbrowser_get.side_effect = auth.webbrowser.Error(
+                'no runnable browser')
+
+        with self.assertRaisesRegex(
+                auth.BrowserLaunchError, 'Could not launch a browser'):
+            auth.client_from_login_flow(
+                    API_KEY, APP_SECRET,
+                    'https://127.0.0.1:{}/callback'.format(self.port),
+                    self.token_path, callback_socket=self.socket,
+                    interactive=False)
+
+    @patch('schwab.auth.OAuth2Client', new_callable=MockOAuthClient)
+    @patch('schwab.auth.webbrowser.get', new_callable=MagicMock)
+    def test_browser_open_exception_raises_browser_launch_error(
+            self, mock_webbrowser_get, sync_session):
+        sync_session.return_value = sync_session
+        sync_session.create_authorization_url.return_value = (
+                'https://auth.url.com', 'state')
+        controller = MagicMock()
+        controller.open.side_effect = OSError('launch failed')
+        mock_webbrowser_get.return_value = controller
+
+        with self.assertRaises(auth.BrowserLaunchError):
+            auth.client_from_login_flow(
+                    API_KEY, APP_SECRET,
+                    'https://127.0.0.1:{}/callback'.format(self.port),
+                    self.token_path, callback_socket=self.socket,
+                    interactive=False)
+
+    @patch('schwab.auth.OAuth2Client', new_callable=MockOAuthClient)
+    @patch('schwab.auth.webbrowser.get', new_callable=MagicMock)
+    def test_browser_open_false_raises_browser_launch_error(
+            self, mock_webbrowser_get, sync_session):
+        sync_session.return_value = sync_session
+        sync_session.create_authorization_url.return_value = (
+                'https://auth.url.com', 'state')
+        controller = MagicMock()
+        controller.open.return_value = False
+        mock_webbrowser_get.return_value = controller
+
+        with self.assertRaisesRegex(
+                auth.BrowserLaunchError, 'controller could not open'):
+            auth.client_from_login_flow(
+                    API_KEY, APP_SECRET,
+                    'https://127.0.0.1:{}/callback'.format(self.port),
+                    self.token_path, callback_socket=self.socket,
+                    interactive=False)
+
+
     @patch('schwab.auth.Client')
     @patch('schwab.auth.OAuth2Client', new_callable=MockOAuthClient)
     @patch('schwab.auth.AsyncOAuth2Client', new_callable=MockAsyncOAuthClient)
@@ -509,7 +565,7 @@ class ClientFromLoginFlowTest(unittest.TestCase):
         mock_get.return_value = response
 
         with self.assertRaisesRegex(
-                auth.RedirectServerExitedError,
+                auth.UnsafeCallbackPortError,
                 'Something other than the schwab callback server'):
             auth.client_from_login_flow(
                     API_KEY, APP_SECRET, f'https://127.0.0.1:{self.port}/callback',
@@ -2634,6 +2690,108 @@ class EasyClientTest(unittest.TestCase):
         c = auth.easy_client(API_KEY, APP_SECRET, CALLBACK_URL, self.token_path)
 
         self.assertIs(c, mock_client)
+
+
+    @no_duplicates
+    @patch('schwab.auth.client_from_token_file')
+    @patch('schwab.auth.client_from_manual_flow', new_callable=MockOAuthClient)
+    @patch('schwab.auth.client_from_login_flow', new_callable=MockOAuthClient)
+    @patch('time.time', MagicMock(return_value=MOCK_NOW))
+    def test_automatic_failures_fall_back_to_manual_flow(
+            self, client_from_login_flow, client_from_manual_flow,
+            client_from_token_file):
+        manual_client = MagicMock()
+        client_from_manual_flow.return_value = manual_client
+
+        failures = (
+                auth.BrowserLaunchError('browser'),
+                auth.RedirectServerExitedError('listener'),
+                auth.RedirectTimeoutError('capture'))
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                client_from_login_flow.reset_mock()
+                client_from_manual_flow.reset_mock()
+                client_from_login_flow.side_effect = failure
+
+                c = auth.easy_client(
+                        API_KEY, APP_SECRET, CALLBACK_URL, self.token_path,
+                        asyncio=True, enforce_enums=False)
+
+                self.assertIs(c, manual_client)
+                client_from_manual_flow.assert_called_once_with(
+                        API_KEY, APP_SECRET, CALLBACK_URL, self.token_path,
+                        asyncio=True, enforce_enums=False)
+
+    @no_duplicates
+    @patch('schwab.auth.client_from_token_file')
+    @patch('schwab.auth.client_from_manual_flow', new_callable=MockOAuthClient)
+    @patch('schwab.auth.client_from_login_flow', new_callable=MockOAuthClient)
+    @patch('time.time', MagicMock(return_value=MOCK_NOW))
+    def test_manual_fallback_can_be_disabled(
+            self, client_from_login_flow, client_from_manual_flow,
+            client_from_token_file):
+        client_from_login_flow.side_effect = auth.BrowserLaunchError('browser')
+
+        with self.assertRaises(auth.BrowserLaunchError):
+            auth.easy_client(
+                    API_KEY, APP_SECRET, CALLBACK_URL, self.token_path,
+                    manual_fallback=False)
+
+        client_from_manual_flow.assert_not_called()
+
+    @no_duplicates
+    @patch('schwab.auth.client_from_token_file')
+    @patch('schwab.auth.client_from_manual_flow', new_callable=MockOAuthClient)
+    @patch('schwab.auth.client_from_login_flow', new_callable=MockOAuthClient)
+    @patch('time.time', MagicMock(return_value=MOCK_NOW))
+    def test_foreign_callback_listener_never_falls_back_to_manual_flow(
+            self, client_from_login_flow, client_from_manual_flow,
+            client_from_token_file):
+        client_from_login_flow.side_effect = auth.UnsafeCallbackPortError(
+                'another service owns the callback port')
+
+        with self.assertRaises(auth.UnsafeCallbackPortError):
+            auth.easy_client(
+                    API_KEY, APP_SECRET, CALLBACK_URL, self.token_path)
+
+        client_from_manual_flow.assert_not_called()
+
+    @no_duplicates
+    @patch('schwab.auth.__running_in_notebook', return_value=False)
+    @patch('schwab.auth.client_from_manual_flow')
+    @patch('schwab.auth.OAuth2Client', new_callable=MockOAuthClient)
+    @patch('schwab.auth.webbrowser.get', new_callable=MagicMock)
+    def test_listener_stops_before_manual_fallback(
+            self, mock_webbrowser_get, sync_session, client_from_manual_flow,
+            running_in_notebook):
+        port = free_callback_port()
+        callback_url = 'https://127.0.0.1:{}/callback'.format(port)
+        sync_session.return_value = sync_session
+        sync_session.create_authorization_url.return_value = (
+                'https://auth.url.com', 'state')
+        mock_webbrowser_get.side_effect = auth.webbrowser.Error('no browser')
+
+        returned_client = MagicMock()
+
+        def manual_after_listener_stops(*args, **kwargs):
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.addCleanup(probe.close)
+            # The automatic server's status probe can leave the port in
+            # TIME_WAIT on Linux after the listener exits, so immediate bind
+            # is not a portable test for a live listener. A refused connect is:
+            # nothing is still accepting callback traffic when manual input
+            # begins.
+            self.assertNotEqual(
+                    0, probe.connect_ex(('127.0.0.1', port)))
+            return returned_client
+
+        client_from_manual_flow.side_effect = manual_after_listener_stops
+
+        self.assertIs(
+                returned_client,
+                auth.easy_client(
+                        API_KEY, APP_SECRET, callback_url, self.token_path,
+                        interactive=False))
 
 
     @no_duplicates

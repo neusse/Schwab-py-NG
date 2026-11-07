@@ -33,6 +33,23 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Copy/paste fallback when automatic OAuth capture fails
+
+``easy_client`` now falls back to the existing manual callback-URL flow when
+Python cannot launch a browser, the local callback listener cannot start, or
+callback capture times out. The listener is fully stopped before a fresh manual
+authorization begins. Schwab credentials, MFA, and consent remain on Schwab's
+hosted pages; the terminal accepts only the complete redirected callback URL.
+Pass ``manual_fallback=False`` for an unattended process which must fail rather
+than prompt.
+
+``client_from_login_flow`` remains strict and now raises
+``BrowserLaunchError`` when a browser controller raises or explicitly reports
+that it did not open the authorization page. If another service answers on the
+callback port, ``UnsafeCallbackPortError`` preserves the security refusal and
+``easy_client`` does not start a manual flow which would send that service a
+fresh authorization code.
+
 ### One connection, every usable streaming feed
 
 A new ``examples/streaming/many_feeds_one_session.py`` program demonstrates
