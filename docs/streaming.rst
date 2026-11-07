@@ -10,8 +10,9 @@ Streaming Client
 
 A wrapper around the Schwab streaming data API. This is a websockets-based
 streaming API that provides up-to-the-second data on market activity,
-including Level Two and time-of-sale data for major equities, options and
-futures exchanges.
+including Level One quotes, Level Two books, charts, screeners, account
+activity, and an undocumented but live-observed headline feed. Schwab does
+not implement streaming time-and-sales services.
 
 Here's an example of how you can receive book snapshots of ``GOOG`` (note if you
 run this outside regular trading hours you may not see anything):
@@ -110,13 +111,13 @@ program needs:
 
   stream.add_level_one_equity_handler(on_quote)
   stream.add_chart_equity_handler(on_bar)
-  stream.add_timesale_equity_handler(on_trade)
+  stream.add_news_headline_handler(on_headline)
   stream.add_account_activity_handler(on_account_event)
 
   await stream.login()
   await stream.level_one_equity_subs(['AAPL', 'MSFT'])
   await stream.chart_equity_subs(['AAPL', 'MSFT'])
-  await stream.timesale_equity_subs(['AAPL', 'MSFT'])
+  await stream.news_headline_subs(['AAPL', 'MSFT'])
   await stream.account_activity_sub()
 
   while True:
@@ -129,11 +130,11 @@ must receive its acknowledgement, while inbound data from already-active feeds
 continues to be routed between requests.
 
 Subscriptions are independent **between services**. A
-``TIMESALE_EQUITY/SUBS`` does not replace ``LEVELONE_EQUITIES`` or
+``NEWS_HEADLINE/SUBS`` does not replace ``LEVELONE_EQUITIES`` or
 ``CHART_EQUITY``. Inside one service, however, another ``SUBS`` replaces that
 service's symbol list; use its ``ADD`` method to retain the existing symbols.
 
-The supported feeds and a typical use for each are:
+The usable, live-observed feeds and a typical use for each are:
 
 ============================  ================================================
 Service                       Typical use
@@ -145,9 +146,6 @@ Service                       Typical use
 ``LEVELONE_FOREX``            Current currency-pair quotes
 ``CHART_EQUITY``              Minute equity OHLCV bars
 ``CHART_FUTURES``             Minute futures OHLCV bars
-``TIMESALE_EQUITY``           Individual equity trades
-``TIMESALE_OPTIONS``          Individual option trades
-``TIMESALE_FUTURES``          Individual futures trades
 ``NYSE_BOOK``                 NYSE depth-of-book price levels
 ``NASDAQ_BOOK``               Nasdaq depth-of-book price levels
 ``OPTIONS_BOOK``              Option depth-of-book price levels
@@ -159,9 +157,14 @@ Service                       Typical use
 
 The `complete many-feeds example
 <https://github.com/neusse/Schwab-py-NG/blob/main/examples/streaming/many_feeds_one_session.py>`__
-registers all seventeen handlers and contains the subscription call for every
-service on one connection. It shows how to read quotes, bars, individual
-trades, book depth, screener rankings, headlines, and account activity.
+registers handlers and contains the subscription call for all fourteen
+live-observed services on one connection. It shows how to read quotes, bars,
+book depth, screener rankings, headlines, and account activity.
+
+``NEWS_HEADLINE`` is included because it has populated in live captures, but
+Schwab does not document it. See :ref:`news_headline` before depending on it.
+The inherited ``TIMESALE_*`` compatibility methods are deliberately absent:
+Schwab does not implement those services. See :ref:`time_and_sales`.
 
 Every example handler passes the **complete** relabeled item to
 ``store_record(record_type, service, record)`` before printing a shorter
@@ -643,12 +646,11 @@ can find them by investigating the various enum classes ending in ``***Fields``.
 
    This is a property of the library, not of Schwab's protocol.
 
-Some streams let you ask for a subset of the fields. The five
-:ref:`level_one` and three :ref:`time_and_sales` subscription functions take
-a list of the appropriate field enums as an extra ``fields`` argument; omit it
-and every supported field is requested. To change the fields of a
-subscription that is already running, rather than at subscribe time, see
-:ref:`the note on VIEW <level_one_view>`. Every field enum has an
+Some streams let you ask for a subset of the fields. The five :ref:`level_one`
+subscription functions take a list of the appropriate field enums as an extra
+``fields`` argument; omit it and every supported field is requested. To change
+the fields of a subscription that is already running, rather than at subscribe
+time, see :ref:`the note on VIEW <level_one_view>`. Every field enum has an
 ``all_fields()``:
 
 .. automethod:: schwab.streaming::StreamClient.LevelOneEquityFields.all_fields
@@ -680,11 +682,10 @@ The following streams are confirmed working:
    effect unconfirmed)
  * :ref:`account_activity`
 
-The :ref:`time_and_sales` request and decoding support is implemented and
-tested against the documented wire protocol, but has not yet been confirmed
-against a live Schwab session. That distinction matters: Schwab does not make
-the detailed streaming reference publicly accessible, and an acknowledged
-subscription is not proof that a service will deliver data.
+The inherited :ref:`time_and_sales` client surface is **not a supported
+stream**. Schwab does not document or implement those services, and reported
+``TIMESALE_EQUITY`` requests return service-unavailable responses. The methods
+remain only to avoid unexpectedly breaking code that imported them.
 
 
 .. _charts:
@@ -733,41 +734,28 @@ Minute-by-minute OHLCV data for futures.
 
 .. _time_and_sales:
 
-+++++++++++++++++++
-Time and Sales
-+++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++
+Unsupported Time and Sales Compatibility API
+++++++++++++++++++++++++++++++++++++++++++++
 
-The time-and-sales services deliver individual trades for equities, futures,
-and options. Register a handler before subscribing, then keep calling
-:meth:`~schwab.streaming.StreamClient.handle_message`:
+.. warning::
 
-.. code-block:: python
+  **Schwab does not support or implement streaming time and sales.** Its
+  current streamer service list contains no ``TIMESALE_EQUITY``,
+  ``TIMESALE_OPTIONS``, or ``TIMESALE_FUTURES`` service. Schwab support was
+  reported as saying the trade stream was not in its development plan, and
+  live attempts against ``TIMESALE_EQUITY`` received service-unavailable
+  responses rather than trade data.
 
-  def on_trade(message):
-      for trade in message.get('content', []):
-          print(
-              trade['key'],
-              trade.get('LAST_PRICE'),
-              trade.get('LAST_SIZE'),
-              trade.get('TRADE_TIME'))
+The methods below are compatibility stubs inherited from the predecessor
+streamer. Their request construction and synthetic response decoding are
+tested, but that does not make the corresponding Schwab services available.
+They remain public only to avoid an unnecessary import/API break and must not
+be presented in application examples or used as a source of live trades.
 
-  stream_client.add_timesale_equity_handler(on_trade)
-  await stream_client.timesale_equity_subs(['AAPL', 'MSFT'])
-
-``SUBS`` replaces the symbol list for that one service; ``ADD`` appends to it;
-``UNSUBS`` removes only the symbols named. Passing ``fields`` to ``SUBS`` or
-``ADD`` requests a subset, and ``SYMBOL`` is included automatically. Unknown
-numeric fields are preserved under their original string key so a newly added
-Schwab field is not discarded.
-
-.. note::
-
-  These service names and their five-field schema are inherited from the
-  predecessor streamer and implemented using Schwab's current request format.
-  The requests, response handling, and field relabeling are covered by tests,
-  but this project has not yet captured a live Schwab time-and-sales frame.
-  Please report live results on `issue #2
-  <https://github.com/neusse/Schwab-py-NG/issues/2>`__.
+For data Schwab actually supplies, use :ref:`level_one` fields such as last
+price, last size, and trade time for the latest observed trade, or use
+:ref:`charts` for minute OHLCV bars. Neither is an event-by-event trade tape.
 
 .. automethod:: schwab.streaming::StreamClient.timesale_equity_subs
 .. automethod:: schwab.streaming::StreamClient.timesale_equity_unsubs

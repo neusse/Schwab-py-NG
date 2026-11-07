@@ -1,4 +1,4 @@
-"""Subscribe to every supported feed family on one streaming connection.
+"""Subscribe to every usable, live-observed feed on one streaming connection.
 
 Schwab permits one streaming session per user, not one feed per session. A
 single StreamClient can carry many services and symbols at the same time. This
@@ -99,21 +99,6 @@ def show_chart_bar(message):
         })
 
 
-def show_trade(message):
-    """Use time-and-sales feeds for each individual market trade."""
-    for trade in content(message):
-        # STORAGE HOOK: append this individual print to a trades table or
-        # queue. Unlike level one, this is an event, not current quote state.
-        store_record('trade', message['service'], trade)
-
-        print(message['service'], trade.get('key'), {
-            'time': trade.get('TRADE_TIME'),
-            'price': trade.get('LAST_PRICE'),
-            'size': trade.get('LAST_SIZE'),
-            'sequence': trade.get('LAST_SEQUENCE'),
-        })
-
-
 def show_book(message):
     """Use book feeds for market-depth price levels."""
     for book in content(message):
@@ -155,7 +140,7 @@ def show_screener(message):
 
 
 def show_news(message):
-    """Use headline feeds for symbol-related news notifications."""
+    """Use Schwab's undocumented, live-observed headline notifications."""
     for story in content(message):
         # STORAGE HOOK: store the whole story notification. A headline may be
         # delivered more than once or under several subscribed symbols, so a
@@ -198,10 +183,6 @@ def register_handlers(stream):
     stream.add_chart_equity_handler(show_chart_bar)
     stream.add_chart_futures_handler(show_chart_bar)
 
-    stream.add_timesale_equity_handler(show_trade)
-    stream.add_timesale_options_handler(show_trade)
-    stream.add_timesale_futures_handler(show_trade)
-
     stream.add_nyse_book_handler(show_book)
     stream.add_nasdaq_book_handler(show_book)
     stream.add_options_book_handler(show_book)
@@ -225,11 +206,6 @@ async def subscribe(stream):
     await stream.chart_equity_subs(EQUITIES)
     await stream.chart_futures_subs(FUTURES)
 
-    # Time and sales is the event-by-event trade tape, useful when minute bars
-    # or the latest level-one trade are not detailed enough.
-    await stream.timesale_equity_subs(EQUITIES)
-    await stream.timesale_futures_subs(FUTURES)
-
     # Books are nested market depth, useful for liquidity and imbalance work.
     await stream.nyse_book_subs(NYSE_EQUITIES)
     await stream.nasdaq_book_subs(NASDAQ_EQUITIES)
@@ -239,18 +215,20 @@ async def subscribe(stream):
     await stream.screener_equity_subs(EQUITY_SCREENERS)
     await stream.screener_option_subs(OPTION_SCREENERS)
 
-    # News emits headline notifications for the subscribed symbols. Account
-    # activity emits events for your own orders and fills, not market data.
+    # NEWS_HEADLINE is undocumented but has populated in live captures. It can
+    # change without notice, so do not make it your only source of news.
     await stream.news_headline_subs(EQUITIES)
+
+    # Account activity emits events for your own orders and fills, not market
+    # data.
     await stream.account_activity_sub()
 
     if OPTION_SYMBOL:
         option_symbols = [OPTION_SYMBOL]
         await stream.level_one_option_subs(option_symbols)
-        await stream.timesale_options_subs(option_symbols)
         await stream.options_book_subs(option_symbols)
     else:
-        print('Set SCHWAB_OPTION_SYMBOL to enable the three option feeds')
+        print('Set SCHWAB_OPTION_SYMBOL to enable the two option feeds')
 
     if FUTURES_OPTION_SYMBOL:
         await stream.level_one_futures_options_subs(

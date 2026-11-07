@@ -139,6 +139,7 @@ _KNOWN_SERVICES = frozenset((
     'OPTIONS_BOOK',
     'SCREENER_EQUITY',
     'SCREENER_OPTION',
+    # Predecessor compatibility only. Schwab does not implement these three.
     'TIMESALE_EQUITY',
     'TIMESALE_FUTURES',
     'TIMESALE_OPTIONS',
@@ -3731,15 +3732,15 @@ class StreamClient(EnumEnforcer):
             _Handler(handler, self.LevelOneFuturesOptionsFields))
 
     ##########################################################################
-    # TIMESALE
+    # UNSUPPORTED TIMESALE COMPATIBILITY API
 
     class TimesaleFields(_BaseFieldEnum):
-        '''Fields carried by the equity, option, and futures trade feeds.
+        '''Compatibility field names for unsupported time-and-sales services.
 
-        Schwab retains the five-field time-and-sales wire shape used by the
-        predecessor streamer. The service names are Schwab's current names;
-        the field meanings have not yet been verified against a live capture
-        in this project.
+        Schwab does not document or implement ``TIMESALE_EQUITY``,
+        ``TIMESALE_OPTIONS``, or ``TIMESALE_FUTURES``. This five-field shape
+        is inherited from the predecessor streamer and has never been observed
+        in a live Schwab frame. It remains only for API compatibility.
         '''
 
         #: Ticker or contract symbol. Represented as ``key`` on the wire.
@@ -3758,7 +3759,11 @@ class StreamClient(EnumEnforcer):
         LAST_SEQUENCE = 4
 
     async def timesale_equity_subs(self, symbols, *, fields=None):
-        '''Subscribe to time-and-sales updates for equities.
+        '''Build an unsupported equity time-and-sales subscription request.
+
+        Schwab does not implement this service; reported live requests return
+        a service-unavailable response. This method remains for compatibility
+        and should not be used by applications.
 
         :param symbols: Equity symbols to receive trades for.
         :param fields: Iterable of :class:`TimesaleFields` to return. If
@@ -3769,22 +3774,25 @@ class StreamClient(EnumEnforcer):
             fields=fields, add_symbol=True)
 
     async def timesale_equity_unsubs(self, symbols):
-        '''Stop time-and-sales updates for the named equity symbols.'''
+        '''Build UNSUBS for Schwab's unsupported equity compatibility name.'''
         await self._service_op(symbols, 'TIMESALE_EQUITY', 'UNSUBS')
 
     async def timesale_equity_add(self, symbols, *, fields=None):
-        '''Add equity symbols to the current time-and-sales subscription.'''
+        '''Build an ADD request for Schwab's unsupported equity service.'''
         await self._service_op(
             symbols, 'TIMESALE_EQUITY', 'ADD', self.TimesaleFields,
             fields=fields, add_symbol=True)
 
     def add_timesale_equity_handler(self, handler):
-        '''Register a handler for equity time-and-sales updates.'''
+        '''Register a handler for an unsupported Schwab compatibility name.'''
         self._handlers['TIMESALE_EQUITY'].append(
             _Handler(handler, self.TimesaleFields))
 
     async def timesale_futures_subs(self, symbols, *, fields=None):
-        '''Subscribe to time-and-sales updates for futures contracts.
+        '''Build an unsupported futures time-and-sales subscription request.
+
+        Schwab does not document or implement this service. This method
+        remains for compatibility and should not be used by applications.
 
         :param symbols: Futures symbols to receive trades for.
         :param fields: Iterable of :class:`TimesaleFields` to return. If
@@ -3795,22 +3803,25 @@ class StreamClient(EnumEnforcer):
             fields=fields, add_symbol=True)
 
     async def timesale_futures_unsubs(self, symbols):
-        '''Stop time-and-sales updates for the named futures symbols.'''
+        '''Build UNSUBS for Schwab's unsupported futures compatibility name.'''
         await self._service_op(symbols, 'TIMESALE_FUTURES', 'UNSUBS')
 
     async def timesale_futures_add(self, symbols, *, fields=None):
-        '''Add futures symbols to the current time-and-sales subscription.'''
+        '''Build an ADD request for Schwab's unsupported futures service.'''
         await self._service_op(
             symbols, 'TIMESALE_FUTURES', 'ADD', self.TimesaleFields,
             fields=fields, add_symbol=True)
 
     def add_timesale_futures_handler(self, handler):
-        '''Register a handler for futures time-and-sales updates.'''
+        '''Register a handler for an unsupported Schwab compatibility name.'''
         self._handlers['TIMESALE_FUTURES'].append(
             _Handler(handler, self.TimesaleFields))
 
     async def timesale_options_subs(self, symbols, *, fields=None):
-        '''Subscribe to time-and-sales updates for option contracts.
+        '''Build an unsupported option time-and-sales subscription request.
+
+        Schwab does not document or implement this service. This method
+        remains for compatibility and should not be used by applications.
 
         :param symbols: Option symbols to receive trades for.
         :param fields: Iterable of :class:`TimesaleFields` to return. If
@@ -3821,17 +3832,17 @@ class StreamClient(EnumEnforcer):
             fields=fields, add_symbol=True)
 
     async def timesale_options_unsubs(self, symbols):
-        '''Stop time-and-sales updates for the named option symbols.'''
+        '''Build UNSUBS for Schwab's unsupported option compatibility name.'''
         await self._service_op(symbols, 'TIMESALE_OPTIONS', 'UNSUBS')
 
     async def timesale_options_add(self, symbols, *, fields=None):
-        '''Add option symbols to the current time-and-sales subscription.'''
+        '''Build an ADD request for Schwab's unsupported option service.'''
         await self._service_op(
             symbols, 'TIMESALE_OPTIONS', 'ADD', self.TimesaleFields,
             fields=fields, add_symbol=True)
 
     def add_timesale_options_handler(self, handler):
-        '''Register a handler for option time-and-sales updates.'''
+        '''Register a handler for an unsupported Schwab compatibility name.'''
         self._handlers['TIMESALE_OPTIONS'].append(
             _Handler(handler, self.TimesaleFields))
 

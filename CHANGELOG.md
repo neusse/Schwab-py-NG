@@ -33,36 +33,34 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
-### One connection, every streaming feed
+### One connection, every usable streaming feed
 
 A new ``examples/streaming/many_feeds_one_session.py`` program demonstrates
-all seventeen supported stream services sharing one ``StreamClient``. Its
-handlers show the useful shapes for quotes, minute bars, individual trades,
-order books, screeners, headlines, and account activity. Expiring option
-contracts are supplied through environment variables instead of stale sample
-symbols. Every handler now calls a prominent ``store_record`` hook with the
-complete payload, with comments showing whether to append an event, merge
-current state, or save a whole snapshot and warning against blocking the shared
-stream reader with a slow database write.
+all fourteen live-observed stream services sharing one ``StreamClient``. Its
+handlers show the useful shapes for quotes, minute bars, order books, screeners,
+headlines, and account activity. Expiring option contracts are supplied through
+environment variables instead of stale sample symbols. Every handler now calls
+a prominent ``store_record`` hook with the complete payload, with comments
+showing whether to merge current state or save a whole snapshot and warning
+against blocking the shared stream reader with a slow database write.
 
 The streaming guide now explains the difference between Schwab's one-session
 limit and the many subscriptions that session can carry, maps every service to
 its typical use, and links the complete example and the existing backpressure
 pattern.
 
-### Equity, option, and futures time-and-sales streams
+### Unsupported time-and-sales compatibility API
 
-``StreamClient`` now exposes Schwab's ``TIMESALE_EQUITY``,
-``TIMESALE_OPTIONS``, and ``TIMESALE_FUTURES`` services. Each has ``subs``,
-``add``, and ``unsubs`` operations plus a handler registration method. The
-shared ``TimesaleFields`` enum labels trade time, last price, last size, and
-sequence number; unknown numeric fields remain available under their original
-keys.
+``StreamClient`` retains methods for the predecessor streamer's
+``TIMESALE_EQUITY``, ``TIMESALE_OPTIONS``, and ``TIMESALE_FUTURES`` names. They
+are compatibility methods, not supported Schwab feeds: Schwab does not document
+or implement these services, and reported equity requests return
+service-unavailable responses. They have been removed from runnable examples
+and supported-feed counts.
 
-The request format and decoding are covered by tests. The five-field schema is
-inherited from the predecessor streamer and has not yet been confirmed by a
-live Schwab capture, so the streaming guide marks that confidence boundary
-explicitly.
+The inherited request format and synthetic decoding remain covered by tests so
+the compatibility surface does not silently rot. The streaming guide and API
+docstrings now state that applications must not rely on it.
 
 ### Hourly price-history candles without hand-written resampling
 
@@ -442,7 +440,7 @@ asks for five more, and a client date parameter given a `tzinfo` that returns
 no UTC offset now sends the wall clock it was written with rather than that
 clock converted from whichever zone the machine is in.
 
-- **`NEWS_HEADLINE` is supported.** Schwab's streamer documentation lists
+- **`NEWS_HEADLINE` was observed working but is undocumented.** Schwab's streamer documentation lists
   thirteen services and none of them is news, but subscribing to a fourteenth
   returns `code: 0` and delivers headlines from Reuters, MT Newswire,
   GlobeNewswire and others. Every one was discarded before: the service was
