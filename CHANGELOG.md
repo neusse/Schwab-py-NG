@@ -40,7 +40,10 @@ all seventeen supported stream services sharing one ``StreamClient``. Its
 handlers show the useful shapes for quotes, minute bars, individual trades,
 order books, screeners, headlines, and account activity. Expiring option
 contracts are supplied through environment variables instead of stale sample
-symbols.
+symbols. Every handler now calls a prominent ``store_record`` hook with the
+complete payload, with comments showing whether to append an event, merge
+current state, or save a whole snapshot and warning against blocking the shared
+stream reader with a slow database write.
 
 The streaming guide now explains the difference between Schwab's one-session
 limit and the many subscriptions that session can carry, maps every service to

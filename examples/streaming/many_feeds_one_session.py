@@ -31,6 +31,10 @@ FOREX = ['EUR/USD']
 OPTION_SYMBOL = os.environ.get('SCHWAB_OPTION_SYMBOL')
 FUTURES_OPTION_SYMBOL = os.environ.get('SCHWAB_FUTURES_OPTION_SYMBOL')
 
+# A screener is a server-maintained ranking, such as "the ten most actively
+# traded Nasdaq stocks in the current five-minute bucket." Its key is
+# PREFIX_SORT-FIELD_FREQUENCY, not a ticker symbol. Each update is a complete
+# ranked snapshot rather than one stock changing position.
 EQUITY_SCREENERS = ['NASDAQ_VOLUME_5']
 OPTION_SCREENERS = ['OPTION_CALL_VOLUME_5']
 
@@ -40,9 +44,38 @@ def content(message):
     return message.get('content', ())
 
 
+def store_record(record_type, service, record):
+    """THIS IS THE HOOK FOR SAVING STREAM DATA.
+
+    Every handler below calls this function with the complete relabeled item,
+    before printing a smaller human-friendly summary. Replace ``pass`` with
+    your own storage handoff. For example:
+
+        storage_queue.put_nowait((record_type, service, record.copy()))
+
+    A separate worker can read that queue and write PostgreSQL, SQLite, Redis,
+    Parquet, a message broker, or your own in-memory model. Do not perform a
+    slow database or network write directly here: handlers share the stream's
+    reader, so blocking this function delays every subscribed feed.
+
+    ``record_type`` says which table or collection it naturally belongs in.
+    ``service`` distinguishes feeds such as equity and futures quotes.
+    ``record`` is the full item; store it rather than the print summary if you
+    may need fields later.
+    """
+    pass
+
+
 def show_quote(message):
-    """Use level-one feeds for the current bid, ask, and last trade."""
+    """Use level-one feeds for current market state, not every trade."""
     for quote in content(message):
+        # STORAGE HOOK: save the complete quote update here. Level-one updates
+        # can contain only fields that changed, so a database consumer may
+        # merge this item into the last known state for quote['key'].
+        store_record('quote', message['service'], quote)
+
+        # Printing is only a demo. The saved `quote` above contains many more
+        # fields than this short display.
         print(message['service'], quote.get('key'), {
             'bid': quote.get('BID_PRICE'),
             'ask': quote.get('ASK_PRICE'),
@@ -53,6 +86,10 @@ def show_quote(message):
 def show_chart_bar(message):
     """Use chart feeds for minute OHLCV bars."""
     for bar in content(message):
+        # STORAGE HOOK: a natural candle-table key is service + symbol + bar
+        # timestamp. Store the full bar so later analysis retains OHLCV.
+        store_record('minute_bar', message['service'], bar)
+
         print(message['service'], bar.get('key'), {
             'open': bar.get('OPEN_PRICE'),
             'high': bar.get('HIGH_PRICE'),
@@ -63,8 +100,12 @@ def show_chart_bar(message):
 
 
 def show_trade(message):
-    """Use time-and-sales feeds for individual prints."""
+    """Use time-and-sales feeds for each individual market trade."""
     for trade in content(message):
+        # STORAGE HOOK: append this individual print to a trades table or
+        # queue. Unlike level one, this is an event, not current quote state.
+        store_record('trade', message['service'], trade)
+
         print(message['service'], trade.get('key'), {
             'time': trade.get('TRADE_TIME'),
             'price': trade.get('LAST_PRICE'),
@@ -76,6 +117,11 @@ def show_trade(message):
 def show_book(message):
     """Use book feeds for market-depth price levels."""
     for book in content(message):
+        # STORAGE HOOK: save the whole book item, including every bid/ask level
+        # and its per-exchange breakdown. The print below keeps only the best
+        # prices and counts, which is not enough to reconstruct market depth.
+        store_record('order_book', message['service'], book)
+
         bids = book.get('BIDS') or []
         asks = book.get('ASKS') or []
         best_bid = bids[0].get('BID_PRICE') if bids else None
@@ -89,9 +135,21 @@ def show_book(message):
 
 
 def show_screener(message):
-    """Use screener feeds for a complete ranked snapshot."""
+    """Use screeners for complete server-ranked market snapshots.
+
+    A screener is not a quote subscription. ``NASDAQ_VOLUME_5`` asks Schwab
+    for a ranked Nasdaq volume list using a five-minute bucket. ``ITEMS`` is
+    the complete current ranking; a symbol missing from the next push simply
+    fell out of that snapshot.
+    """
     for snapshot in content(message):
         ranked = snapshot.get('ITEMS') or []
+
+        # STORAGE HOOK: store one snapshot with its TIMESTAMP, SORT_FIELD,
+        # FREQUENCY, key, and complete ITEMS list. Saving only the printed
+        # symbols throws away prices, changes, volume, rank inputs, and time.
+        store_record('screener_snapshot', message['service'], snapshot)
+
         print(message['service'], snapshot.get('key'),
               [item.get('symbol') or item.get('SYMBOL') for item in ranked])
 
@@ -99,6 +157,11 @@ def show_screener(message):
 def show_news(message):
     """Use headline feeds for symbol-related news notifications."""
     for story in content(message):
+        # STORAGE HOOK: store the whole story notification. A headline may be
+        # delivered more than once or under several subscribed symbols, so a
+        # storage worker can deduplicate using the identifiers and timestamp.
+        store_record('news_headline', message['service'], story)
+
         print(message['service'], story.get('key'), {
             'headline': story.get('HEADLINE'),
             'source': story.get('SOURCE'),
@@ -109,6 +172,11 @@ def show_news(message):
 def show_account_activity(message):
     """Use account activity for order, fill, cancel, and change events."""
     for event in content(message):
+        # STORAGE HOOK: persist the complete event before interpreting it.
+        # MESSAGE_DATA can be JSON text or a plain-text Schwab notice, and the
+        # full original is valuable when an unfamiliar event type appears.
+        store_record('account_activity', message['service'], event)
+
         print(message['service'], event.get('MESSAGE_TYPE'),
               event.get('MESSAGE_DATA'))
 
@@ -147,16 +215,22 @@ def register_handlers(stream):
 
 async def subscribe(stream):
     """Subscribe to many independent services on the same connection."""
+    # Level one is current quote state: best bid/ask, last, sizes, and related
+    # fields. It is the usual feed for a live quote display or current model.
     await stream.level_one_equity_subs(EQUITIES)
     await stream.level_one_futures_subs(FUTURES)
     await stream.level_one_forex_subs(FOREX)
 
+    # Charts are minute OHLCV bars, useful for indicators and candle storage.
     await stream.chart_equity_subs(EQUITIES)
     await stream.chart_futures_subs(FUTURES)
 
+    # Time and sales is the event-by-event trade tape, useful when minute bars
+    # or the latest level-one trade are not detailed enough.
     await stream.timesale_equity_subs(EQUITIES)
     await stream.timesale_futures_subs(FUTURES)
 
+    # Books are nested market depth, useful for liquidity and imbalance work.
     await stream.nyse_book_subs(NYSE_EQUITIES)
     await stream.nasdaq_book_subs(NASDAQ_EQUITIES)
 
@@ -165,6 +239,8 @@ async def subscribe(stream):
     await stream.screener_equity_subs(EQUITY_SCREENERS)
     await stream.screener_option_subs(OPTION_SCREENERS)
 
+    # News emits headline notifications for the subscribed symbols. Account
+    # activity emits events for your own orders and fills, not market data.
     await stream.news_headline_subs(EQUITIES)
     await stream.account_activity_sub()
 

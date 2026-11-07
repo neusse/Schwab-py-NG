@@ -163,6 +163,20 @@ registers all seventeen handlers and contains the subscription call for every
 service on one connection. It shows how to read quotes, bars, individual
 trades, book depth, screener rankings, headlines, and account activity.
 
+Every example handler passes the **complete** relabeled item to
+``store_record(record_type, service, record)`` before printing a shorter
+summary. That function is the deliberate storage hook: replace its ``pass``
+with a fast handoff to your queue, database writer, message broker, or in-memory
+model. Keep the write itself outside the stream handler when it can block. The
+example comments identify whether each record is an event to append, current
+state to merge, or a complete snapshot to store together.
+
+The screener example is deliberately more explicit because its key and payload
+are easy to misread. ``NASDAQ_VOLUME_5`` is a request for a ranked Nasdaq
+volume snapshot using a five-minute bucket; it is not a ticker. Each push's
+``ITEMS`` is the whole current ranking, not a series of individual changes, so
+the storage hook receives that list as one timestamped snapshot.
+
 Option and futures-option symbols expire. The example therefore reads current
 contracts from ``SCHWAB_OPTION_SYMBOL`` and
 ``SCHWAB_FUTURES_OPTION_SYMBOL`` instead of embedding stale sample contracts.
