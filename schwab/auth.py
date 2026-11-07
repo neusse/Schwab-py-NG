@@ -756,6 +756,10 @@ class RedirectTimeoutError(SchwabError):
     pass
 
 
+class BrowserLaunchError(SchwabError):
+    '''The automatic OAuth flow could not open Schwab's authorization page.'''
+
+
 def _carries_another_state(received_url, state):
     '''Whether a redirect names a ``state`` other than this login's. One that
     names none is not ignored: the exchange refuses it by name, where
@@ -773,6 +777,10 @@ def _carries_another_state(received_url, state):
 
 class RedirectServerExitedError(SchwabError):
     pass
+
+
+class UnsafeCallbackPortError(RedirectServerExitedError):
+    '''Another service answered on the configured OAuth callback port.'''
 
 # Capture the real time.time so that we can use it in server initialization
 # while simultaneously mocking it in testing
@@ -1008,7 +1016,7 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
                 if resp.status_code == httpx2.codes.OK:
                     break
 
-                raise RedirectServerExitedError(
+                raise UnsafeCallbackPortError(
                         ('Something other than the schwab callback server '
                          'is listening on port {}: it answered the status '
                          'check with HTTP {}. Refusing to start a login flow '
@@ -1053,8 +1061,20 @@ def client_from_login_flow(api_key, app_secret, callback_url, token_path,
             input('Press ENTER to open the browser. Note you can call ' +
                   'this method with interactive=False to skip this input.')
 
-        controller = webbrowser.get(requested_browser)
-        controller.open(auth_context.authorization_url)
+        try:
+            controller = webbrowser.get(requested_browser)
+            opened = controller.open(auth_context.authorization_url)
+        except (webbrowser.Error, OSError) as exc:
+            raise BrowserLaunchError(
+                    'Could not launch a browser for Schwab authorization.') \
+                    from exc
+
+        # Python's browser controllers report a launch they could not perform
+        # by returning False. Ignoring it leaves the caller waiting for a
+        # callback from a browser which never opened.
+        if opened is False:
+            raise BrowserLaunchError(
+                    'The browser controller could not open Schwab authorization.')
 
         # Wait for a response
         now = __TIME_TIME()
@@ -1544,7 +1564,7 @@ def __running_in_notebook():
 def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False, 
                 enforce_enums=True, max_token_age=60*60*24*6.5,
                 callback_timeout=300.0, interactive=True,
-                requested_browser=None):
+                requested_browser=None, manual_fallback=True):
     '''
     Convenient wrapper around :func:`client_from_login_flow` and
     :func:`client_from_token_file`. If ``token_path`` exists, loads the token
@@ -1563,6 +1583,12 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
 
     In a Jupyter or Colab notebook this routes to
     :func:`client_from_manual_flow` instead, which starts no callback server.
+
+    If automatic browser launch or callback capture fails, ``manual_fallback``
+    starts a fresh :func:`client_from_manual_flow` after the local callback
+    listener has stopped. Authentication still happens on Schwab's website;
+    the terminal asks only for the complete redirected callback URL. Set it to
+    ``False`` for an unattended process which must fail instead of prompting.
 
     :param api_key: Your Schwab application's app key.
     :param app_secret: Application secret provided upon :ref:`app approval 
@@ -1598,6 +1624,9 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
     :param requested_browser: See the corresponding parameter to 
                               :func:`client_from_login_flow 
                               <client_from_login_flow>`.
+    :param manual_fallback: Fall back to the copy/paste callback-URL flow when
+                            automatic browser launch, callback-listener startup,
+                            or callback capture fails. Defaults to ``True``.
     '''
     api_key = __normalize_credential(api_key, 'api_key')
     app_secret = __normalize_credential(app_secret, 'app_secret')
@@ -1633,13 +1662,45 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
             'Returning client fetched using manual flow, writing' +
             'token to \'%s\'', token_path)
     else:
-        c = client_from_login_flow(
-            api_key, app_secret, callback_url, token_path, asyncio=asyncio,
-            enforce_enums=enforce_enums, callback_timeout=callback_timeout,
-            requested_browser=requested_browser, interactive=interactive)
+        try:
+            c = client_from_login_flow(
+                api_key, app_secret, callback_url, token_path, asyncio=asyncio,
+                enforce_enums=enforce_enums,
+                callback_timeout=callback_timeout,
+                requested_browser=requested_browser,
+                interactive=interactive)
+        except UnsafeCallbackPortError:
+            # A foreign service owns the callback port. A manual flow would
+            # send its authorization code to that service too, so preserve the
+            # security refusal instead of prompting.
+            raise
+        except (BrowserLaunchError, RedirectServerExitedError,
+                RedirectTimeoutError) as exc:
+            if not manual_fallback:
+                raise
 
-        logger.info(
-            'Returning client fetched using web browser, writing' +
-            'token to \'%s\'', token_path)
+            # Do not print the exception: browser-controller errors can contain
+            # commands or paths, and callback errors need no user data to
+            # explain the fallback. client_from_login_flow has already unwound
+            # its callback-server context and joined the child at this point.
+            print()
+            print('Automatic browser/callback capture failed ({}).'.format(
+                    type(exc).__name__))
+            print('The local callback listener has stopped. Starting a fresh')
+            print('copy/paste login; use only the new authorization URL below.')
+            print('Schwab credentials and MFA stay on Schwab\'s website.')
+            print()
+
+            c = client_from_manual_flow(
+                    api_key, app_secret, callback_url, token_path,
+                    asyncio=asyncio, enforce_enums=enforce_enums)
+            logger.info(
+                    'Automatic OAuth capture failed with %s; returning client '
+                    'fetched using manual flow, writing token to \'%s\'',
+                    type(exc).__name__, token_path)
+        else:
+            logger.info(
+                'Returning client fetched using web browser, writing' +
+                'token to \'%s\'', token_path)
 
     return c

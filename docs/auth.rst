@@ -33,6 +33,9 @@ a way that's appropriate to the context in which you're running:
    automatically capture the created token.
  * In a notebook like Google Colab or Jupyter, instead run the :func:`manual
    flow <schwab.auth.client_from_manual_flow>`.
+ * If the desktop browser cannot launch or its local callback cannot be
+   captured, stop the callback listener and fall back to that same copy/paste
+   flow. Pass ``manual_fallback=False`` when prompting would be inappropriate.
 
 .. note::
 
@@ -125,6 +128,33 @@ token.
 If for some reason you cannot open a web browser, such as when running in a
 cloud environment or a notebook, this function will guide you through the
 process of manually creating a token by copy-pasting relevant URLs.
+
+"Manual" does not mean entering Schwab credentials in Python. The function
+prints a Schwab authorization URL; you open it in a browser, sign in and
+complete MFA on Schwab's hosted pages, approve the application, then paste the
+**entire redirected callback URL** into the prompt. That URL contains a
+short-lived authorization code and must be treated like a secret: do not put it
+in logs, issue reports, screenshots, or chat.
+
+By default, :func:`~schwab.auth.easy_client` uses this flow as a fallback when
+automatic browser launch fails, its callback listener cannot start, or callback
+capture times out. It deliberately refuses to fall back when another service
+answers on the callback port, because either flow would send that service the
+authorization code; choose a free callback port instead. The listener is
+stopped before the fallback creates a fresh authorization URL and OAuth state.
+Use only that newly printed URL; a URL from the abandoned automatic attempt
+belongs to a different state. Set
+``manual_fallback=False`` to propagate the automatic-flow exception instead of
+prompting, particularly in an unattended service.
+
+Calling :func:`~schwab.auth.client_from_login_flow` directly remains strict. A
+browser controller which raises or explicitly returns ``False`` produces
+:class:`~schwab.auth.BrowserLaunchError`; listener and capture failures keep
+raising :class:`~schwab.auth.RedirectServerExitedError` or
+:class:`~schwab.auth.RedirectTimeoutError`. A foreign service on the callback
+port raises :class:`~schwab.auth.UnsafeCallbackPortError`, a subclass of
+``RedirectServerExitedError`` which ``easy_client`` never converts to a manual
+flow.
 
 .. autofunction:: schwab.auth.client_from_manual_flow
 

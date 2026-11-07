@@ -997,6 +997,8 @@ class UtilsTest(unittest.TestCase):
             'LoginExchangeError': ('invalid_grant', 'code already used'),
             'RedirectTimeoutError': ('m',),
             'RedirectServerExitedError': ('m',),
+            'UnsafeCallbackPortError': ('m',),
+            'BrowserLaunchError': ('m',),
             'InvalidOrderException': ('m',),
             'UnusableDecimalScale': ('m',),
             'UnparsableMessageData': ('m',),
