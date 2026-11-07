@@ -430,17 +430,105 @@ Current Quotes
 Option Chains
 +++++++++++++
 
-This page does not attempt to explain options themselves. The method below
-covers every parameter Schwab's endpoint accepts; for what they mean, read
-Schwab's own documentation.
+An option chain is market data, not an order. It tells you which contracts
+Schwab currently returns and gives each contract's exact ``symbol``; use those
+symbols with the :ref:`option order templates <order_templates>`. Requesting a
+``STRADDLE`` or ``VERTICAL`` chain does **not** create that order. It asks the
+market-data endpoint to organize or calculate a strategy-shaped response.
 
-If you know the subject well enough to write something more substantive here,
-:ref:`contributing` has the instructions.
+A small single-contract window is a useful starting point:
+
+.. code-block:: python
+
+  import datetime
+
+  from schwab.client import Client
+
+  response = client.get_option_chain(
+      'AAPL',
+      contract_type=Client.Options.ContractType.ALL,
+      strike_count=5,
+      from_date=datetime.date(2027, 1, 1),
+      to_date=datetime.date(2027, 3, 31),
+      option_type=Client.Options.Type.STANDARD,
+  )
+  response.raise_for_status()
+  chain = response.json()
+
+The parameter groups answer different questions:
+
+* ``contract_type`` selects calls, puts, or both. ``option_type`` selects
+  standard, non-standard, or all contracts; these are different filters.
+* ``strike`` requests one exact strike, ``strike_range`` requests a moneyness
+  category, and ``strike_count`` asks for a number of strikes around the
+  market. The client sends whichever combination you provide and does not
+  decide whether Schwab considers that combination meaningful. Start with one
+  strike selector unless you have verified a combination against the current
+  endpoint.
+* ``from_date`` and ``to_date`` delimit expirations. Pass
+  ``datetime.date`` objects, not ISO strings. A ``datetime`` is accepted
+  because it is a ``date`` subclass, but this endpoint serializes only its
+  calendar day and discards the time.
+* ``exp_month`` filters by calendar month across the requested window.
+* ``strategy`` requests a strategy chain. ``interval`` supplies the strike
+  interval used by spread-shaped strategy chains. ``volatility``,
+  ``underlying_price``, ``interest_rate``, and ``days_to_expiration`` are
+  analytical inputs and apply to ``ANALYTICAL`` chains.
+* ``include_underlying_quote`` asks Schwab to include the underlying quote.
+  ``entitlement`` identifies the market-data entitlement when one must be
+  stated explicitly.
+
+For example, this requests market data arranged as verticals; it does not
+construct a vertical order:
+
+.. code-block:: python
+
+  response = client.get_option_chain(
+      'AAPL',
+      strategy=Client.Options.Strategy.VERTICAL,
+      interval=5.0,
+      strike_count=3,
+  )
+  response.raise_for_status()
+
+**Response handling**
+
+For a single chain, Schwab commonly groups contracts beneath
+``callExpDateMap`` and ``putExpDateMap``. Treat the expiration-map and
+strike-map keys as labels rather than parsing business logic out of them. A
+strike can contain more than one contract record, and either map can be empty
+or absent. This guarded traversal collects the records without assuming one
+contract per strike:
+
+.. code-block:: python
+
+  contracts = []
+  for side in ('callExpDateMap', 'putExpDateMap'):
+      for strike_map in chain.get(side, {}).values():
+          for contracts_at_strike in strike_map.values():
+              contracts.extend(contracts_at_strike)
+
+  symbols = [contract['symbol'] for contract in contracts
+             if 'symbol' in contract]
+
+Do not rely on map ordering, take the first expiration or strike without
+checking it, or synthesize a symbol from a display description when Schwab has
+already returned the exact symbol. Empty results are valid market-data results,
+not necessarily client failures. The response schema belongs to Schwab and can
+change independently of this library; check the HTTP status, retain the raw
+response while diagnosing, and code defensively around optional fields. The
+current official endpoint specification is linked from the method reference
+below and may require signing in to the Schwab Developer Portal.
 
 .. automethod:: schwab.client.Client.get_option_chain
 .. autoclass:: schwab.client.Client.Options
   :members:
   :undoc-members:
+
+The similarly named
+:class:`~schwab.orders.common.ComplexOrderStrategyType` belongs to order
+construction, not chain retrieval. See :ref:`complex_options_strategies` and
+:ref:`order_templates` after selecting contracts.
 
 If you only need to know *when* contracts expire rather than what they cost,
 there is a cheaper call which returns the expiration list on its own:

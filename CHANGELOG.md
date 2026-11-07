@@ -33,6 +33,14 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Expanded option-chain and complex-order guide
+
+The documentation now connects option-chain filters and response handling to
+single-leg and multi-leg order construction. It distinguishes market-data
+strategy chains from complex order strategies, shows tested option-order
+examples, documents raw builder fields and net pricing, and links the stricter
+NG compatibility rules for symbols and prices.
+
 ### Long and short straddle order templates
 
 Four validated option-order helpers now open and close long and short
