@@ -1828,7 +1828,7 @@ class DocExampleTest(unittest.TestCase):
         blocks = self.code_blocks_in(
                 DocReferenceTest.doc_files() + self.example_files())
 
-        checked, failures = [], []
+        checked, failures, executed = [], [], set()
         for where, line, code in blocks:
             try:
                 tree = ast.parse(code)
@@ -1866,6 +1866,7 @@ class DocExampleTest(unittest.TestCase):
 
                 where_line = '%s:%d %s' % (where, line, name)
                 checked.append(where_line)
+                executed.add((where, name))
 
                 # Marked calls are run too, and required to raise. Skipping
                 # them instead would let the documentation claim something
@@ -1891,6 +1892,10 @@ class DocExampleTest(unittest.TestCase):
         self.assertGreater(len(checked), 4,
                            'expected to have executed several documented '
                            'template calls, found {}'.format(checked))
+        self.assertIn(
+            ('order-templates.rst', 'option_buy_to_open_limit'), executed)
+        self.assertIn(
+            ('order-templates.rst', 'long_straddle_open'), executed)
 
     @no_duplicates
     def test_the_template_call_check_would_catch_a_string_quantity(self):

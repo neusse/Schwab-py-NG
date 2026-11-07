@@ -610,24 +610,79 @@ then applies has not been measured here.
 .. automethod:: schwab.orders.generic.OrderBuilder.clear_tax_lot_method
 
 
+.. _complex_options_strategies:
+
 ++++++++++++++++++++++++++
 Complex Options Strategies
 ++++++++++++++++++++++++++
 
-Schwab supports a number of complex options strategies. These strategies are
-complex affairs, with each leg of the trade specified in the order legs. Schwab
-performs additional validation on these strategies, so they are somewhat
-complicated to place. However, the benefit is more flexibility, as trades like
-trailing stop orders based on net debit/credit can be specified.
+Three similarly named fields describe different parts of a complex option
+order:
 
-Unfortunately, due to the complexity of these orders and the lack of any real
-documentation, we cannot definitively say how to structure these orders. A few
-things have been observed, however:
+* :class:`~schwab.orders.common.OrderStrategyType` describes whether this is a
+  standalone order (``SINGLE``) or a composite such as ``OCO`` or ``TRIGGER``.
+* :class:`~schwab.orders.common.ComplexOrderStrategyType` tells Schwab the
+  relationship among the option legs, such as ``VERTICAL`` or ``STRADDLE``.
+* :class:`~schwab.orders.common.OrderType` describes execution and pricing. A
+  spread paid for overall uses ``NET_DEBIT``; one which receives money overall
+  uses ``NET_CREDIT``; a zero-cost spread uses ``NET_ZERO``.
 
- * The legs of the order can be placed by adding them as option order legs using
-   :meth:`~schwab.orders.generic.OrderBuilder.add_option_leg`.
- * For spreads resulting in a new debit/credit, the price represents the overall
-   debit or credit desired.
+These order strategy values are unrelated to
+:class:`Client.Options.Strategy <schwab.client.Client.Options>` on
+:meth:`~schwab.client.Client.get_option_chain`. The latter shapes a market-data
+response and never creates an order.
+
+Prefer the :ref:`tested option templates <order_templates>` when one exists.
+They set the strategy, order type, instructions, session, duration, and equal
+leg quantities together. A raw builder is appropriate for a shape without a
+template or when you deliberately need to alter one of those fields.
+
+Here is the raw equivalent shape of a one-contract bull call vertical opened
+for a net debit. The lower-strike call is bought and the higher-strike call is
+sold in the same order:
+
+.. code-block:: python
+
+  from schwab.orders.common import (
+      ComplexOrderStrategyType,
+      Duration,
+      OptionInstruction,
+      OrderStrategyType,
+      OrderType,
+      Session,
+  )
+  from schwab.orders.generic import OrderBuilder
+
+  vertical = (
+      OrderBuilder()
+      .set_session(Session.NORMAL)
+      .set_duration(Duration.DAY)
+      .set_order_strategy_type(OrderStrategyType.SINGLE)
+      .set_complex_order_strategy_type(ComplexOrderStrategyType.VERTICAL)
+      .set_order_type(OrderType.NET_DEBIT)
+      .set_price('1.20')
+      .set_quantity(1)
+      .add_option_leg(
+          OptionInstruction.BUY_TO_OPEN,
+          'AAPL  270115C00150000',
+          1)
+      .add_option_leg(
+          OptionInstruction.SELL_TO_OPEN,
+          'AAPL  270115C00155000',
+          1)
+  )
+
+  preview = client.preview_order(account_hash, vertical.build())
+  preview.raise_for_status()
+
+The order's ``price`` is the net price for the whole spread, not a price copied
+onto each leg. Each leg carries its own opening or closing instruction and
+contract quantity. The builder validates individual setter inputs but does not
+prove that the legs form the strategy named, that the account has the required
+options approval, or that Schwab currently accepts the combination. Preview
+when available, start with the smallest acceptable risk, and inspect a
+rejection response rather than treating a successfully built dictionary as an
+accepted order.
 
 If you use these strategies successfully, please say so on the `issue tracker
 <https://github.com/neusse/Schwab-py-NG/issues>`__. What works is worth more here

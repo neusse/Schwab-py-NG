@@ -165,12 +165,45 @@ parts back.
 
 .. automethod:: schwab.orders.options.OptionSymbol.parse_symbol
 
+**From a chain to an order**
+
+The safest source of an order symbol is the ``symbol`` field in a current
+:meth:`option-chain response <schwab.client.Client.get_option_chain>`. A chain
+quote is only market data: choosing a contract, price, instruction, and
+quantity is still your responsibility. Before migrating existing code, read
+the `order compatibility notes
+<https://github.com/neusse/Schwab-py-NG/blob/main/COMPATIBILITY_CHANGES.md#order-construction-and-order-tracking>`__:
+NG requires intentional price strings or ``decimal.Decimal`` values and parses
+option symbols more strictly than the original project.
+
 
 ++++++++++++++
 Single Options
 ++++++++++++++
 
-Buy and sell single options.
+Buy and sell single options. The instruction is part of the helper name:
+``buy_to_open`` enters a long position, ``sell_to_close`` exits it,
+``sell_to_open`` enters a short position, and ``buy_to_close`` exits that short
+position. Do not choose an opening helper merely because its side is "buy" or
+"sell"; whether the order opens or closes is material to Schwab's position and
+approval checks.
+
+This literal example is executed by the documentation test suite. Replace the
+symbol and limit with a current contract and a price you intend:
+
+.. code-block:: python
+
+  from schwab.orders.options import option_buy_to_open_limit
+
+  order = option_buy_to_open_limit(
+      'AAPL  270115C00150000', 1, '2.50').build()
+
+  preview = client.preview_order(account_hash, order)
+  preview.raise_for_status()
+
+Previewing and placing are separate calls. Inspect the preview response before
+calling :meth:`~schwab.client.Client.place_order`; a successful ``build()``
+only means a Python dictionary was produced, not that Schwab will accept it.
 
 .. autofunction:: schwab.orders.options.option_buy_to_open_market
 .. autofunction:: schwab.orders.options.option_buy_to_open_limit
@@ -248,12 +281,20 @@ not proof that Schwab currently trades the contract.
 
   from schwab.orders.options import long_straddle_open
 
-  call_symbol = 'AAPL  270115C00150000'  # Replace with current chain symbols.
-  put_symbol = 'AAPL  270115P00150000'
-
   order = long_straddle_open(
-      call_symbol, put_symbol, quantity=1, net_debit='12.40')
-  client.place_order(account_hash, order.build())
+      'AAPL  270115C00150000',
+      'AAPL  270115P00150000',
+      1,
+      '12.40').build()
+
+  preview = client.preview_order(account_hash, order)
+  preview.raise_for_status()
+
+The template sets the order-level quantity and both leg quantities to one. In
+a hand-built ratio strategy the leg quantities describe each leg's contract
+count and can differ. The separate :ref:`order-level quantity
+<undocumented_quantity>` is still not sufficiently documented by Schwab to use
+it as a substitute for leg ratios.
 
 .. autofunction:: schwab.orders.options.long_straddle_open
 .. autofunction:: schwab.orders.options.long_straddle_close
