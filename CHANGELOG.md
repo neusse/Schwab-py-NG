@@ -33,6 +33,14 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Long and short straddle order templates
+
+Four validated option-order helpers now open and close long and short
+straddles. They require a call and put with the same underlying, expiration,
+and strike, a positive whole-contract quantity, and a positive finite net
+debit or credit. Each helper emits the corresponding ``STRADDLE`` strategy,
+order type, and opening or closing instructions.
+
 ### Copy/paste fallback when automatic OAuth capture fails
 
 ``easy_client`` now falls back to the existing manual callback-URL flow when

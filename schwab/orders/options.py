@@ -272,6 +272,79 @@ def __base_builder():
             .set_duration(Duration.DAY))
 
 
+def __validate_straddle_symbols(call_symbol, put_symbol):
+    '''Validate the two contracts which form a straddle.'''
+    try:
+        call = OptionSymbol.parse_symbol(call_symbol)
+    except ValueError as exc:
+        raise ValueError(
+            'call_symbol is not a valid option symbol: {}'.format(exc)) from exc
+
+    try:
+        put = OptionSymbol.parse_symbol(put_symbol)
+    except ValueError as exc:
+        raise ValueError(
+            'put_symbol is not a valid option symbol: {}'.format(exc)) from exc
+
+    if call.contract_type != 'C':
+        raise ValueError('call_symbol must identify a call option')
+    if put.contract_type != 'P':
+        raise ValueError('put_symbol must identify a put option')
+
+    call_contract = (
+        call.underlying_symbol, call.expiration_date, call.strike_price)
+    put_contract = (
+        put.underlying_symbol, put.expiration_date, put.strike_price)
+    if call_contract != put_contract:
+        raise ValueError(
+            'straddle call and put must have the same underlying, expiration, '
+            'and strike')
+
+
+def __validate_straddle_quantity(quantity):
+    # Options trade in whole contracts. In particular, bool is an int in
+    # Python, but True must not quietly become one contract in an order.
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError('straddle quantity must be a positive whole number')
+
+
+def __validate_straddle_price(name, price):
+    if isinstance(price, decimal.Decimal):
+        value = price
+    elif type(price) is str:
+        try:
+            value = decimal.Decimal(price)
+        except decimal.InvalidOperation as exc:
+            raise ValueError(
+                '{} must be a positive finite price'.format(name)) from exc
+    else:
+        raise ValueError(
+            '{} must be a string or a decimal.Decimal'.format(name))
+
+    if not value.is_finite() or value <= 0:
+        raise ValueError('{} must be a positive finite price'.format(name))
+
+
+def __straddle_builder(
+        call_symbol, put_symbol, quantity, price, price_name, order_type,
+        instruction):
+    from schwab.orders.common import ComplexOrderStrategyType
+    from schwab.orders.common import OrderStrategyType
+
+    __validate_straddle_symbols(call_symbol, put_symbol)
+    __validate_straddle_quantity(quantity)
+    __validate_straddle_price(price_name, price)
+
+    return (__base_builder()
+            .set_order_type(order_type)
+            .set_complex_order_strategy_type(ComplexOrderStrategyType.STRADDLE)
+            .set_price(price)
+            .set_quantity(quantity)
+            .set_order_strategy_type(OrderStrategyType.SINGLE)
+            .add_option_leg(instruction, call_symbol, quantity)
+            .add_option_leg(instruction, put_symbol, quantity))
+
+
 ################################################################################
 # Single options
 
@@ -574,3 +647,66 @@ def bear_put_vertical_close(
                 OptionInstruction.BUY_TO_CLOSE, short_put_symbol, quantity)
             .add_option_leg(
                 OptionInstruction.SELL_TO_CLOSE, long_put_symbol, quantity))
+
+
+################################################################################
+# Straddles
+
+def long_straddle_open(call_symbol, put_symbol, quantity, net_debit):
+    '''Return a builder which opens a long straddle for a net debit.
+
+    The symbols must be a call and put with the same underlying, expiration,
+    and strike. ``quantity`` is a positive whole number of contracts and
+    ``net_debit`` is a positive price string or :class:`decimal.Decimal`.
+    See :ref:`straddles` for a complete example.
+    '''
+    from schwab.orders.common import OptionInstruction, OrderType
+
+    return __straddle_builder(
+        call_symbol, put_symbol, quantity, net_debit, 'net_debit',
+        OrderType.NET_DEBIT, OptionInstruction.BUY_TO_OPEN)
+
+
+def long_straddle_close(call_symbol, put_symbol, quantity, net_credit):
+    '''Return a builder which closes a long straddle for a net credit.
+
+    The symbols must be a call and put with the same underlying, expiration,
+    and strike. ``quantity`` is a positive whole number of contracts and
+    ``net_credit`` is a positive price string or :class:`decimal.Decimal`.
+    See :ref:`straddles` for details.
+    '''
+    from schwab.orders.common import OptionInstruction, OrderType
+
+    return __straddle_builder(
+        call_symbol, put_symbol, quantity, net_credit, 'net_credit',
+        OrderType.NET_CREDIT, OptionInstruction.SELL_TO_CLOSE)
+
+
+def short_straddle_open(call_symbol, put_symbol, quantity, net_credit):
+    '''Return a builder which opens a short straddle for a net credit.
+
+    The symbols must be a call and put with the same underlying, expiration,
+    and strike. ``quantity`` is a positive whole number of contracts and
+    ``net_credit`` is a positive price string or :class:`decimal.Decimal`.
+    See :ref:`straddles` for details.
+    '''
+    from schwab.orders.common import OptionInstruction, OrderType
+
+    return __straddle_builder(
+        call_symbol, put_symbol, quantity, net_credit, 'net_credit',
+        OrderType.NET_CREDIT, OptionInstruction.SELL_TO_OPEN)
+
+
+def short_straddle_close(call_symbol, put_symbol, quantity, net_debit):
+    '''Return a builder which closes a short straddle for a net debit.
+
+    The symbols must be a call and put with the same underlying, expiration,
+    and strike. ``quantity`` is a positive whole number of contracts and
+    ``net_debit`` is a positive price string or :class:`decimal.Decimal`.
+    See :ref:`straddles` for details.
+    '''
+    from schwab.orders.common import OptionInstruction, OrderType
+
+    return __straddle_builder(
+        call_symbol, put_symbol, quantity, net_debit, 'net_debit',
+        OrderType.NET_DEBIT, OptionInstruction.BUY_TO_CLOSE)
