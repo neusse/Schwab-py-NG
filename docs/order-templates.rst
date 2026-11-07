@@ -226,6 +226,41 @@ Put Verticals
 .. autofunction:: schwab.orders.options.bear_put_vertical_close
 
 
+.. _straddles:
+
++++++++++
+Straddles
++++++++++
+
+A straddle combines a call and a put on the same underlying, expiration, and
+strike. A long straddle buys both contracts for a net debit; a short straddle
+sells both for a net credit. The close helpers reverse those instructions and
+the debit or credit. Short options can carry substantial risk and require the
+corresponding Schwab options approval.
+
+Pass the call symbol first and the put symbol second. The helpers validate that
+they form a true pair, that the quantity is a positive whole number of
+contracts, and that the net price is a positive string or ``decimal.Decimal``.
+Use symbols returned by :ref:`option_chain`; a syntactically correct symbol is
+not proof that Schwab currently trades the contract.
+
+.. code-block:: python
+
+  from schwab.orders.options import long_straddle_open
+
+  call_symbol = 'AAPL  270115C00150000'  # Replace with current chain symbols.
+  put_symbol = 'AAPL  270115P00150000'
+
+  order = long_straddle_open(
+      call_symbol, put_symbol, quantity=1, net_debit='12.40')
+  client.place_order(account_hash, order.build())
+
+.. autofunction:: schwab.orders.options.long_straddle_open
+.. autofunction:: schwab.orders.options.long_straddle_close
+.. autofunction:: schwab.orders.options.short_straddle_open
+.. autofunction:: schwab.orders.options.short_straddle_close
+
+
 ---------------
 Utility Methods
 ---------------

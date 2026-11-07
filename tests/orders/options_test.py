@@ -1,4 +1,5 @@
 import datetime
+import decimal
 import unittest
 
 from schwab.orders.common import *
@@ -642,6 +643,114 @@ class VerticalTemplatesTest(unittest.TestCase):
             'GOOG_012122P2200',
             'GOOG_012122P2400',
             3, '30.60').build()))
+
+
+class StraddleTemplatesTest(unittest.TestCase):
+
+    CALL = 'AAPL  270115C00150000'
+    PUT = 'AAPL  270115P00150000'
+
+    def expected_order(self, order_type, instruction):
+        return {
+            'orderType': order_type,
+            'session': 'NORMAL',
+            'duration': 'DAY',
+            'orderStrategyType': 'SINGLE',
+            'price': '12.40',
+            'complexOrderStrategyType': 'STRADDLE',
+            'quantity': 2,
+            'orderLegCollection': [{
+                'instruction': instruction,
+                'quantity': 2,
+                'instrument': {
+                    'symbol': self.CALL,
+                    'assetType': 'OPTION',
+                },
+            }, {
+                'instruction': instruction,
+                'quantity': 2,
+                'instrument': {
+                    'symbol': self.PUT,
+                    'assetType': 'OPTION',
+                },
+            }],
+        }
+
+    @no_duplicates
+    def test_long_straddle_open(self):
+        self.assertEqual(
+            self.expected_order('NET_DEBIT', 'BUY_TO_OPEN'),
+            long_straddle_open(self.CALL, self.PUT, 2, '12.40').build())
+
+    @no_duplicates
+    def test_long_straddle_close(self):
+        self.assertEqual(
+            self.expected_order('NET_CREDIT', 'SELL_TO_CLOSE'),
+            long_straddle_close(self.CALL, self.PUT, 2, '12.40').build())
+
+    @no_duplicates
+    def test_short_straddle_open(self):
+        self.assertEqual(
+            self.expected_order('NET_CREDIT', 'SELL_TO_OPEN'),
+            short_straddle_open(self.CALL, self.PUT, 2, '12.40').build())
+
+    @no_duplicates
+    def test_short_straddle_close(self):
+        self.assertEqual(
+            self.expected_order('NET_DEBIT', 'BUY_TO_CLOSE'),
+            short_straddle_close(self.CALL, self.PUT, 2, '12.40').build())
+
+    @no_duplicates
+    def test_a_decimal_net_price_is_rendered_exactly(self):
+        order = long_straddle_open(
+            self.CALL, self.PUT, 2, decimal.Decimal('12.400')).build()
+        self.assertEqual('12.400', order['price'])
+
+    @no_duplicates
+    def test_symbols_must_be_a_matching_call_and_put(self):
+        invalid_pairs = (
+            ('not an option', self.PUT),
+            (self.CALL, 'not an option'),
+            (self.PUT, self.CALL),
+            (self.CALL, 'MSFT  270115P00150000'),
+            (self.CALL, 'AAPL  270122P00150000'),
+            (self.CALL, 'AAPL  270115P00155000'),
+        )
+        for call_symbol, put_symbol in invalid_pairs:
+            with self.subTest(call_symbol=call_symbol, put_symbol=put_symbol):
+                with self.assertRaises(ValueError):
+                    long_straddle_open(
+                        call_symbol, put_symbol, 2, '12.40')
+
+    @no_duplicates
+    def test_every_template_rejects_non_whole_or_nonpositive_quantities(self):
+        templates = (
+            long_straddle_open, long_straddle_close,
+            short_straddle_open, short_straddle_close,
+        )
+        for template in templates:
+            for quantity in (True, 1.0, '1', 0, -1):
+                with self.subTest(
+                        template=template.__name__, quantity=quantity):
+                    with self.assertRaisesRegex(
+                            ValueError, 'positive whole number'):
+                        template(self.CALL, self.PUT, quantity, '12.40')
+
+    @no_duplicates
+    def test_every_template_rejects_invalid_net_prices(self):
+        templates = (
+            long_straddle_open, long_straddle_close,
+            short_straddle_open, short_straddle_close,
+        )
+        invalid_prices = (
+            12.40, 'not a price', '0', '-1',
+            decimal.Decimal('Infinity'), decimal.Decimal('NaN'),
+        )
+        for template in templates:
+            for price in invalid_prices:
+                with self.subTest(template=template.__name__, price=price):
+                    with self.assertRaises(ValueError):
+                        template(self.CALL, self.PUT, 2, price)
 
 
 
