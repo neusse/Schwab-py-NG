@@ -251,9 +251,11 @@ asyncio.run(main())
 
 One Schwab user can have only one streaming connection, but that connection
 can carry many feeds at once. The **[many-feeds example](examples/streaming/many_feeds_one_session.py)**
-subscribes one `StreamClient` to quotes, charts, time-and-sales, books,
-screeners, news, and account activity, and the **[streaming guide](https://neusse.github.io/Schwab-py-NG/streaming.html#one-session-many-feeds)**
-maps every supported service to its typical use.
+subscribes one `StreamClient` to quotes, charts, books, screeners, news, and
+account activity, and the **[streaming guide](https://neusse.github.io/Schwab-py-NG/streaming.html#one-session-many-feeds)**
+maps every usable service to its typical use. Schwab does not implement the
+inherited `TIMESALE_*` services; use level-one trade fields or chart bars
+instead.
 
 New here? The **[getting started guide](https://neusse.github.io/Schwab-py-NG/getting-started.html)** walks through
 registering an app with Schwab and getting your first token.
@@ -266,7 +268,7 @@ registering an app with Schwab and getting your first token.
 |---|---|
 | **Authentication** | Browser login, a manual flow for headless boxes and notebooks, a two-step flow for web backends, and token refresh handled for you |
 | **Market data** | Quotes, fundamentals, option chains, price history from one-minute through weekly bars—including locally aggregated hourly candles—movers, market hours, instrument lookup |
-| **Streaming** | Seventeen services over one websocket: level one equities, options, futures and forex; equity, option, and futures time-and-sales; Nasdaq and NYSE order books; charts, screeners, news headlines, and your own account activity. The time-and-sales wire implementation is new and awaits live Schwab confirmation. |
+| **Streaming** | Fourteen live-observed services over one websocket: level one equities, options, futures and forex; Nasdaq and NYSE order books; charts, screeners, news headlines, and your own account activity. News is an undocumented Schwab service that has delivered data in live captures and can change without notice. |
 | **Orders** | Construction, placement, replacement, cancellation and preview, with templates for the common equity orders and option strategies |
 | **Accounts** | Balances, positions, orders and transaction history |
 | **Sync and async** | Swap `Client` for `AsyncClient`, add `await`, change nothing else |
@@ -284,6 +286,10 @@ A few things people ask for that Schwab's API does not offer:
 
 - **No paper trading.** Orders placed through this API are real.
 - **No historical options pricing.** Current chains only.
+- **No streaming time and sales.** Schwab does not implement the inherited
+  `TIMESALE_EQUITY`, `TIMESALE_OPTIONS`, or `TIMESALE_FUTURES` services. Their
+  compatibility methods remain in this library, but applications should not
+  call them.
 - **No thinkorswim.** Schwab owns
   [thinkorswim](https://www.schwab.com/trading/thinkorswim/desktop), but this API is
   unaffiliated with it. You can trade the same accounts; some of what TOS does has no
