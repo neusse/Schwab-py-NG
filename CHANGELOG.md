@@ -33,6 +33,20 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Equity, option, and futures time-and-sales streams
+
+``StreamClient`` now exposes Schwab's ``TIMESALE_EQUITY``,
+``TIMESALE_OPTIONS``, and ``TIMESALE_FUTURES`` services. Each has ``subs``,
+``add``, and ``unsubs`` operations plus a handler registration method. The
+shared ``TimesaleFields`` enum labels trade time, last price, last size, and
+sequence number; unknown numeric fields remain available under their original
+keys.
+
+The request format and decoding are covered by tests. The five-field schema is
+inherited from the predecessor streamer and has not yet been confirmed by a
+live Schwab capture, so the streaming guide marks that confidence boundary
+explicitly.
+
 ### Hourly price-history candles without hand-written resampling
 
 ``Client.get_price_history_every_hour`` and its ``AsyncClient`` counterpart

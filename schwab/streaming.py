@@ -139,6 +139,9 @@ _KNOWN_SERVICES = frozenset((
     'OPTIONS_BOOK',
     'SCREENER_EQUITY',
     'SCREENER_OPTION',
+    'TIMESALE_EQUITY',
+    'TIMESALE_FUTURES',
+    'TIMESALE_OPTIONS',
 ))
 
 #: What Schwab has sent in place of a service name: an error label, not a
@@ -1628,7 +1631,7 @@ class StreamClient(EnumEnforcer):
                             'carried alongside a response. Ignoring it.')
 
     async def _service_op(self, symbols, service, command, field_type=None,
-                          *, fields=None):
+                          *, fields=None, add_symbol=False):
         parameters = {
             'keys': ','.join(symbols)
         }
@@ -1637,7 +1640,10 @@ class StreamClient(EnumEnforcer):
             if fields is None:
                 fields = field_type.all_fields()
 
-            fields = sorted(self.convert_enum_iterable(fields, field_type))
+            fields = self.convert_enum_iterable(fields, field_type)
+            if add_symbol and field_type.SYMBOL.value not in fields:
+                fields.append(field_type.SYMBOL.value)
+            fields = sorted(fields)
             parameters['fields'] = ','.join(str(f) for f in fields)
 
         request, request_id = self._make_request(
@@ -3723,6 +3729,111 @@ class StreamClient(EnumEnforcer):
         '''
         self._handlers['LEVELONE_FUTURES_OPTIONS'].append(
             _Handler(handler, self.LevelOneFuturesOptionsFields))
+
+    ##########################################################################
+    # TIMESALE
+
+    class TimesaleFields(_BaseFieldEnum):
+        '''Fields carried by the equity, option, and futures trade feeds.
+
+        Schwab retains the five-field time-and-sales wire shape used by the
+        predecessor streamer. The service names are Schwab's current names;
+        the field meanings have not yet been verified against a live capture
+        in this project.
+        '''
+
+        #: Ticker or contract symbol. Represented as ``key`` on the wire.
+        SYMBOL = 0
+
+        #: Time of the trade in milliseconds since the Unix epoch.
+        TRADE_TIME = 1
+
+        #: Price at which the trade was matched.
+        LAST_PRICE = 2
+
+        #: Quantity in the trade.
+        LAST_SIZE = 3
+
+        #: Sequence number assigned to the trade update.
+        LAST_SEQUENCE = 4
+
+    async def timesale_equity_subs(self, symbols, *, fields=None):
+        '''Subscribe to time-and-sales updates for equities.
+
+        :param symbols: Equity symbols to receive trades for.
+        :param fields: Iterable of :class:`TimesaleFields` to return. If
+                       unset, all fields are requested.
+        '''
+        await self._service_op(
+            symbols, 'TIMESALE_EQUITY', 'SUBS', self.TimesaleFields,
+            fields=fields, add_symbol=True)
+
+    async def timesale_equity_unsubs(self, symbols):
+        '''Stop time-and-sales updates for the named equity symbols.'''
+        await self._service_op(symbols, 'TIMESALE_EQUITY', 'UNSUBS')
+
+    async def timesale_equity_add(self, symbols, *, fields=None):
+        '''Add equity symbols to the current time-and-sales subscription.'''
+        await self._service_op(
+            symbols, 'TIMESALE_EQUITY', 'ADD', self.TimesaleFields,
+            fields=fields, add_symbol=True)
+
+    def add_timesale_equity_handler(self, handler):
+        '''Register a handler for equity time-and-sales updates.'''
+        self._handlers['TIMESALE_EQUITY'].append(
+            _Handler(handler, self.TimesaleFields))
+
+    async def timesale_futures_subs(self, symbols, *, fields=None):
+        '''Subscribe to time-and-sales updates for futures contracts.
+
+        :param symbols: Futures symbols to receive trades for.
+        :param fields: Iterable of :class:`TimesaleFields` to return. If
+                       unset, all fields are requested.
+        '''
+        await self._service_op(
+            symbols, 'TIMESALE_FUTURES', 'SUBS', self.TimesaleFields,
+            fields=fields, add_symbol=True)
+
+    async def timesale_futures_unsubs(self, symbols):
+        '''Stop time-and-sales updates for the named futures symbols.'''
+        await self._service_op(symbols, 'TIMESALE_FUTURES', 'UNSUBS')
+
+    async def timesale_futures_add(self, symbols, *, fields=None):
+        '''Add futures symbols to the current time-and-sales subscription.'''
+        await self._service_op(
+            symbols, 'TIMESALE_FUTURES', 'ADD', self.TimesaleFields,
+            fields=fields, add_symbol=True)
+
+    def add_timesale_futures_handler(self, handler):
+        '''Register a handler for futures time-and-sales updates.'''
+        self._handlers['TIMESALE_FUTURES'].append(
+            _Handler(handler, self.TimesaleFields))
+
+    async def timesale_options_subs(self, symbols, *, fields=None):
+        '''Subscribe to time-and-sales updates for option contracts.
+
+        :param symbols: Option symbols to receive trades for.
+        :param fields: Iterable of :class:`TimesaleFields` to return. If
+                       unset, all fields are requested.
+        '''
+        await self._service_op(
+            symbols, 'TIMESALE_OPTIONS', 'SUBS', self.TimesaleFields,
+            fields=fields, add_symbol=True)
+
+    async def timesale_options_unsubs(self, symbols):
+        '''Stop time-and-sales updates for the named option symbols.'''
+        await self._service_op(symbols, 'TIMESALE_OPTIONS', 'UNSUBS')
+
+    async def timesale_options_add(self, symbols, *, fields=None):
+        '''Add option symbols to the current time-and-sales subscription.'''
+        await self._service_op(
+            symbols, 'TIMESALE_OPTIONS', 'ADD', self.TimesaleFields,
+            fields=fields, add_symbol=True)
+
+    def add_timesale_options_handler(self, handler):
+        '''Register a handler for option time-and-sales updates.'''
+        self._handlers['TIMESALE_OPTIONS'].append(
+            _Handler(handler, self.TimesaleFields))
 
     ##########################################################################
     # Common book utilities

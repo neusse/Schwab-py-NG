@@ -3979,6 +3979,128 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assert_handler_called_once_with(async_handler, expected_item)
 
     ##########################################################################
+    # TIMESALE
+
+    @no_duplicates
+    @patch('schwab.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_timesale_services_subs_add_and_unsubs(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+
+        services = (
+            ('equity', 'TIMESALE_EQUITY', ['MSFT'], ['GOOG']),
+            ('futures', 'TIMESALE_FUTURES', ['/ES'], ['/NQ']),
+            ('options', 'TIMESALE_OPTIONS',
+             ['MSFT  260116C00400000'], ['GOOG  260116C00200000']),
+        )
+        request_id = 1
+
+        for method_name, service, initial_symbols, added_symbols in services:
+            for command, symbols in (
+                    ('SUBS', initial_symbols),
+                    ('ADD', added_symbols),
+                    ('UNSUBS', initial_symbols)):
+                socket.recv.side_effect = [json.dumps(self.success_response(
+                    request_id, service, command))]
+
+                method = getattr(
+                    self.client,
+                    'timesale_{}_{}'.format(
+                        method_name, command.lower()))
+                await method(symbols)
+
+                request = self.request_from_socket_mock(socket)
+                expected_parameters = {'keys': ','.join(symbols)}
+                if command != 'UNSUBS':
+                    expected_parameters['fields'] = '0,1,2,3,4'
+                self.assertEqual(request, {
+                    'service': service,
+                    'command': command,
+                    'requestid': str(request_id),
+                    'SchwabClientCustomerId': self.pref_customer_id,
+                    'SchwabClientCorrelId': self.pref_correl_id,
+                    'parameters': expected_parameters,
+                })
+
+                request_id += 1
+                socket.reset_mock()
+
+    @no_duplicates
+    @patch('schwab.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_timesale_partial_fields_include_symbol(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        socket.recv.side_effect = [json.dumps(self.success_response(
+            1, 'TIMESALE_EQUITY', 'SUBS'))]
+
+        await self.client.timesale_equity_subs(
+            ['MSFT'], fields=(StreamClient.TimesaleFields.LAST_PRICE,))
+
+        request = self.request_from_socket_mock(socket)
+        self.assertEqual(request['parameters'], {
+            'keys': 'MSFT',
+            'fields': '0,2',
+        })
+
+    @no_duplicates
+    @patch('schwab.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_timesale_handlers_relabel_known_fields_and_keep_unknowns(
+            self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        services = (
+            ('equity', 'TIMESALE_EQUITY', 'MSFT'),
+            ('futures', 'TIMESALE_FUTURES', '/ES'),
+            ('options', 'TIMESALE_OPTIONS', 'MSFT  260116C00400000'),
+        )
+
+        for method_name, service, symbol in services:
+            handler = Mock()
+            getattr(
+                self.client,
+                'add_timesale_{}_handler'.format(method_name))(handler)
+            socket.recv.side_effect = [json.dumps({
+                'data': [{
+                    'service': service,
+                    'timestamp': REQUEST_TIMESTAMP,
+                    'command': 'SUBS',
+                    'content': [{
+                        'key': symbol,
+                        '1': 1794012345000,
+                        '2': 420.25,
+                        '3': 10,
+                        '4': 123456,
+                        '5': 'future-field',
+                    }],
+                }],
+            })]
+
+            await self.client.handle_message()
+
+            self.assert_handler_called_once_with(handler, {
+                'service': service,
+                'timestamp': REQUEST_TIMESTAMP,
+                'command': 'SUBS',
+                'content': [{
+                    'key': symbol,
+                    'TRADE_TIME': 1794012345000,
+                    'LAST_PRICE': 420.25,
+                    'LAST_SIZE': 10,
+                    'LAST_SEQUENCE': 123456,
+                    '5': 'future-field',
+                }],
+            })
+            socket.reset_mock()
+
+    @no_duplicates
+    @patch('schwab.streaming.ws_client.connect', new_callable=AsyncMock)
+    async def test_timesale_rejection_raises(self, ws_connect):
+        socket = await self.login_and_get_socket(ws_connect)
+        response = self.success_response(1, 'TIMESALE_EQUITY', 'SUBS')
+        response['response'][0]['content']['code'] = 21
+        socket.recv.side_effect = [json.dumps(response)]
+
+        with self.assertRaises(schwab.streaming.UnexpectedResponseCode):
+            await self.client.timesale_equity_subs(['MSFT'])
+
+    ##########################################################################
     # NYSE_BOOK
 
     @no_duplicates

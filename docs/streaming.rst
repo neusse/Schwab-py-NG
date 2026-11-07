@@ -546,9 +546,9 @@ can find them by investigating the various enum classes ending in ``***Fields``.
    This is a property of the library, not of Schwab's protocol.
 
 Some streams let you ask for a subset of the fields. The five
-:ref:`level_one` subscription functions take a list of the appropriate field
-enums as an extra ``fields`` argument; omit it and every supported field is
-requested. No other service accepts one. To change the fields of a
+:ref:`level_one` and three :ref:`time_and_sales` subscription functions take
+a list of the appropriate field enums as an extra ``fields`` argument; omit it
+and every supported field is requested. To change the fields of a
 subscription that is already running, rather than at subscribe time, see
 :ref:`the note on VIEW <level_one_view>`. Every field enum has an
 ``all_fields()``:
@@ -581,6 +581,12 @@ The following streams are confirmed working:
  * :ref:`news_headline` (``SUBS`` and ``ADD``; ``UNSUBS`` acknowledged, its
    effect unconfirmed)
  * :ref:`account_activity`
+
+The :ref:`time_and_sales` request and decoding support is implemented and
+tested against the documented wire protocol, but has not yet been confirmed
+against a live Schwab session. That distinction matters: Schwab does not make
+the detailed streaming reference publicly accessible, and an acknowledged
+subscription is not proof that a service will deliver data.
 
 
 .. _charts:
@@ -623,6 +629,64 @@ Minute-by-minute OHLCV data for futures.
 .. automethod:: schwab.streaming::StreamClient.chart_futures_add
 .. automethod:: schwab.streaming::StreamClient.add_chart_futures_handler
 .. autoclass:: schwab.streaming::StreamClient.ChartFuturesFields
+  :members:
+  :undoc-members:
+
+
+.. _time_and_sales:
+
++++++++++++++++++++
+Time and Sales
++++++++++++++++++++
+
+The time-and-sales services deliver individual trades for equities, futures,
+and options. Register a handler before subscribing, then keep calling
+:meth:`~schwab.streaming.StreamClient.handle_message`:
+
+.. code-block:: python
+
+  def on_trade(message):
+      for trade in message.get('content', []):
+          print(
+              trade['key'],
+              trade.get('LAST_PRICE'),
+              trade.get('LAST_SIZE'),
+              trade.get('TRADE_TIME'))
+
+  stream_client.add_timesale_equity_handler(on_trade)
+  await stream_client.timesale_equity_subs(['AAPL', 'MSFT'])
+
+``SUBS`` replaces the symbol list for that one service; ``ADD`` appends to it;
+``UNSUBS`` removes only the symbols named. Passing ``fields`` to ``SUBS`` or
+``ADD`` requests a subset, and ``SYMBOL`` is included automatically. Unknown
+numeric fields are preserved under their original string key so a newly added
+Schwab field is not discarded.
+
+.. note::
+
+  These service names and their five-field schema are inherited from the
+  predecessor streamer and implemented using Schwab's current request format.
+  The requests, response handling, and field relabeling are covered by tests,
+  but this project has not yet captured a live Schwab time-and-sales frame.
+  Please report live results on `issue #2
+  <https://github.com/neusse/Schwab-py-NG/issues/2>`__.
+
+.. automethod:: schwab.streaming::StreamClient.timesale_equity_subs
+.. automethod:: schwab.streaming::StreamClient.timesale_equity_unsubs
+.. automethod:: schwab.streaming::StreamClient.timesale_equity_add
+.. automethod:: schwab.streaming::StreamClient.add_timesale_equity_handler
+
+.. automethod:: schwab.streaming::StreamClient.timesale_futures_subs
+.. automethod:: schwab.streaming::StreamClient.timesale_futures_unsubs
+.. automethod:: schwab.streaming::StreamClient.timesale_futures_add
+.. automethod:: schwab.streaming::StreamClient.add_timesale_futures_handler
+
+.. automethod:: schwab.streaming::StreamClient.timesale_options_subs
+.. automethod:: schwab.streaming::StreamClient.timesale_options_unsubs
+.. automethod:: schwab.streaming::StreamClient.timesale_options_add
+.. automethod:: schwab.streaming::StreamClient.add_timesale_options_handler
+
+.. autoclass:: schwab.streaming::StreamClient.TimesaleFields
   :members:
   :undoc-members:
 
