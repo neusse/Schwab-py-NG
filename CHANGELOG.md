@@ -33,6 +33,20 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### One connection, every streaming feed
+
+A new ``examples/streaming/many_feeds_one_session.py`` program demonstrates
+all seventeen supported stream services sharing one ``StreamClient``. Its
+handlers show the useful shapes for quotes, minute bars, individual trades,
+order books, screeners, headlines, and account activity. Expiring option
+contracts are supplied through environment variables instead of stale sample
+symbols.
+
+The streaming guide now explains the difference between Schwab's one-session
+limit and the many subscriptions that session can carry, maps every service to
+its typical use, and links the complete example and the existing backpressure
+pattern.
+
 ### Equity, option, and futures time-and-sales streams
 
 ``StreamClient`` now exposes Schwab's ``TIMESALE_EQUITY``,

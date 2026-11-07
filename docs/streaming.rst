@@ -93,6 +93,90 @@ The example above demonstrates the end-to-end workflow for using ``schwab.stream
 There's more in there than meets the eye, so let's dive into the details.
 
 
+.. _many_feeds_one_session:
+
+-----------------------
+One Session, Many Feeds
+-----------------------
+
+Schwab's limit is **one streaming connection per user**, not one subscription
+or service per connection. Create one :class:`StreamClient`, log it in once,
+and subscribe that same object to as many independent feed services as your
+program needs:
+
+.. code-block:: python
+
+  stream = StreamClient(client)
+
+  stream.add_level_one_equity_handler(on_quote)
+  stream.add_chart_equity_handler(on_bar)
+  stream.add_timesale_equity_handler(on_trade)
+  stream.add_account_activity_handler(on_account_event)
+
+  await stream.login()
+  await stream.level_one_equity_subs(['AAPL', 'MSFT'])
+  await stream.chart_equity_subs(['AAPL', 'MSFT'])
+  await stream.timesale_equity_subs(['AAPL', 'MSFT'])
+  await stream.account_activity_sub()
+
+  while True:
+      # The client examines the service name and calls the matching handlers.
+      await stream.handle_message()
+
+Register handlers before subscribing because some services send their first
+payload immediately. Await subscriptions sequentially as above; each request
+must receive its acknowledgement, while inbound data from already-active feeds
+continues to be routed between requests.
+
+Subscriptions are independent **between services**. A
+``TIMESALE_EQUITY/SUBS`` does not replace ``LEVELONE_EQUITIES`` or
+``CHART_EQUITY``. Inside one service, however, another ``SUBS`` replaces that
+service's symbol list; use its ``ADD`` method to retain the existing symbols.
+
+The supported feeds and a typical use for each are:
+
+============================  ================================================
+Service                       Typical use
+============================  ================================================
+``LEVELONE_EQUITIES``         Current equity bid, ask, last, size, and volume
+``LEVELONE_OPTIONS``          Current option-contract quotes and greeks
+``LEVELONE_FUTURES``          Current futures quotes
+``LEVELONE_FUTURES_OPTIONS``  Current futures-option quotes
+``LEVELONE_FOREX``            Current currency-pair quotes
+``CHART_EQUITY``              Minute equity OHLCV bars
+``CHART_FUTURES``             Minute futures OHLCV bars
+``TIMESALE_EQUITY``           Individual equity trades
+``TIMESALE_OPTIONS``          Individual option trades
+``TIMESALE_FUTURES``          Individual futures trades
+``NYSE_BOOK``                 NYSE depth-of-book price levels
+``NASDAQ_BOOK``               Nasdaq depth-of-book price levels
+``OPTIONS_BOOK``              Option depth-of-book price levels
+``SCREENER_EQUITY``           Ranked equity mover/volume snapshots
+``SCREENER_OPTION``           Ranked option mover/volume snapshots
+``NEWS_HEADLINE``             Symbol-related headline notifications
+``ACCT_ACTIVITY``             Orders, fills, cancels, and account events
+============================  ================================================
+
+The `complete many-feeds example
+<https://github.com/neusse/Schwab-py-NG/blob/main/examples/streaming/many_feeds_one_session.py>`__
+registers all seventeen handlers and contains the subscription call for every
+service on one connection. It shows how to read quotes, bars, individual
+trades, book depth, screener rankings, headlines, and account activity.
+
+Option and futures-option symbols expire. The example therefore reads current
+contracts from ``SCHWAB_OPTION_SYMBOL`` and
+``SCHWAB_FUTURES_OPTION_SYMBOL`` instead of embedding stale sample contracts.
+Obtain a current option symbol from
+:meth:`Client.get_option_chain <schwab.client.Client.get_option_chain>`.
+
+The example prints so each payload is visible. A production handler should do
+very little work: enqueue the message and return, as demonstrated by the
+`backpressure example
+<https://github.com/neusse/Schwab-py-NG/blob/main/examples/streaming/level_one_equity.py>`__.
+Slow work performed directly in a handler delays every service sharing the
+connection.
+
+
 ----------
 Logging In
 ----------

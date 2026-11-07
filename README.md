@@ -249,6 +249,12 @@ async def main():
 asyncio.run(main())
 ```
 
+One Schwab user can have only one streaming connection, but that connection
+can carry many feeds at once. The **[many-feeds example](examples/streaming/many_feeds_one_session.py)**
+subscribes one `StreamClient` to quotes, charts, time-and-sales, books,
+screeners, news, and account activity, and the **[streaming guide](https://neusse.github.io/Schwab-py-NG/streaming.html#one-session-many-feeds)**
+maps every supported service to its typical use.
+
 New here? The **[getting started guide](https://neusse.github.io/Schwab-py-NG/getting-started.html)** walks through
 registering an app with Schwab and getting your first token.
 
