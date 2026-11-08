@@ -33,6 +33,18 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Streaming support audit and futures clarification
+
+Every service presented by the many-feeds example was checked against
+first-hand populated Schwab websocket captures. All fourteen remain in the
+example. In particular, ``LEVELONE_FUTURES``,
+``LEVELONE_FUTURES_OPTIONS``, ``LEVELONE_FOREX``, and ``CHART_FUTURES`` have
+returned populated market-data payloads; Schwab's lack of futures order entry
+does not make those quote and chart feeds unavailable. The streaming guide now
+records an evidence level for every included service and links the source
+audit. The unsupported ``TIMESALE_*`` and unavailable book services remain
+excluded from runnable examples.
+
 ### Expanded option-chain and complex-order guide
 
 The documentation now connects option-chain filters and response handling to

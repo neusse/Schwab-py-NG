@@ -134,26 +134,44 @@ Subscriptions are independent **between services**. A
 ``CHART_EQUITY``. Inside one service, however, another ``SUBS`` replaces that
 service's symbol list; use its ``ADD`` method to retain the existing symbols.
 
-The usable, live-observed feeds and a typical use for each are:
+The usable feeds, their evidence level, and a typical use for each are:
 
-============================  ================================================
-Service                       Typical use
-============================  ================================================
-``LEVELONE_EQUITIES``         Current equity bid, ask, last, size, and volume
-``LEVELONE_OPTIONS``          Current option-contract quotes and greeks
-``LEVELONE_FUTURES``          Current futures quotes
-``LEVELONE_FUTURES_OPTIONS``  Current futures-option quotes
-``LEVELONE_FOREX``            Current currency-pair quotes
-``CHART_EQUITY``              Minute equity OHLCV bars
-``CHART_FUTURES``             Minute futures OHLCV bars
-``NYSE_BOOK``                 NYSE depth-of-book price levels
-``NASDAQ_BOOK``               Nasdaq depth-of-book price levels
-``OPTIONS_BOOK``              Option depth-of-book price levels
-``SCREENER_EQUITY``           Ranked equity mover/volume snapshots
-``SCREENER_OPTION``           Ranked option mover/volume snapshots
-``NEWS_HEADLINE``             Symbol-related headline notifications
-``ACCT_ACTIVITY``             Orders, fills, cancels, and account events
-============================  ================================================
+============================  ==============================  ================================================
+Service                       Evidence                        Typical use
+============================  ==============================  ================================================
+``LEVELONE_EQUITIES``         Documented and live-observed    Current equity bid, ask, last, size, and volume
+``LEVELONE_OPTIONS``          Documented and live-observed    Current option-contract quotes and greeks
+``LEVELONE_FUTURES``          Documented and live-observed    Current futures quotes
+``LEVELONE_FUTURES_OPTIONS``  Documented and live-observed    Current futures-option quotes
+``LEVELONE_FOREX``            Documented and live-observed    Current currency-pair quotes
+``CHART_EQUITY``              Documented and live-observed    Minute equity OHLCV bars
+``CHART_FUTURES``             Documented and live-observed    Minute futures OHLCV bars
+``NYSE_BOOK``                 Documented and live-observed    NYSE depth-of-book price levels
+``NASDAQ_BOOK``               Documented and live-observed    Nasdaq depth-of-book price levels
+``OPTIONS_BOOK``              Documented and live-observed    Option depth-of-book price levels
+``SCREENER_EQUITY``           Documented and live-observed    Ranked equity mover/volume snapshots
+``SCREENER_OPTION``           Documented and live-observed    Ranked option mover/volume snapshots
+``NEWS_HEADLINE``             Undocumented; live-observed     Symbol-related headline notifications
+``ACCT_ACTIVITY``             Documented and live-observed    Orders, fills, cancels, and account events
+============================  ==============================  ================================================
+
+``Live-observed`` means a populated Schwab websocket payload has been captured;
+it is not inferred merely from a method name or a successful subscription
+acknowledgement. Independent captures published in December 2025 include all
+thirteen documented services above, including `futures quotes, futures-option
+quotes, forex quotes, and futures chart bars
+<https://github.com/tylerebowers/Schwabdev/blob/main/docs/pages-raw/stream.md>`__.
+Availability can still depend on Schwab entitlements, the instrument, and
+whether its market is active.
+
+.. important::
+
+  **Futures market data is not futures trading.** Populated
+  ``LEVELONE_FUTURES``, ``LEVELONE_FUTURES_OPTIONS``, and ``CHART_FUTURES``
+  streams have been captured from Schwab. The Trader API nevertheless does not
+  provide futures or futures-options order entry. A statement that the API
+  cannot *trade* futures is therefore not evidence that its futures quote and
+  chart streams are unavailable.
 
 The `complete many-feeds example
 <https://github.com/neusse/Schwab-py-NG/blob/main/examples/streaming/many_feeds_one_session.py>`__
@@ -673,7 +691,7 @@ trying them. If you find one that behaves differently from what is described
 here, please report it `on the issue tracker
 <https://github.com/neusse/Schwab-py-NG/issues>`__.
 
-The following streams are confirmed working:
+The following stream families have produced populated live payloads:
  * :ref:`charts`
  * :ref:`level_one`
  * :ref:`level_two`
@@ -686,6 +704,11 @@ The inherited :ref:`time_and_sales` client surface is **not a supported
 stream**. Schwab does not document or implement those services, and reported
 ``TIMESALE_EQUITY`` requests return service-unavailable responses. The methods
 remain only to avoid unexpectedly breaking code that imported them.
+
+The service audit deliberately distinguishes a populated payload from an API
+surface copied from predecessor documentation. See `Streaming support audit
+<https://github.com/neusse/Schwab-py-NG/blob/main/docs/research/streaming-support-audit.md>`__
+for the source trail and the status of excluded services.
 
 
 .. _charts:
@@ -722,6 +745,9 @@ Futures Charts
 --------------
 
 Minute-by-minute OHLCV data for futures.
+
+This is a market-data stream. It does not imply that Schwab's Trader API
+accepts futures orders.
 
 .. automethod:: schwab.streaming::StreamClient.chart_futures_subs
 .. automethod:: schwab.streaming::StreamClient.chart_futures_unsubs
@@ -901,6 +927,8 @@ Futures Quotes
 
 Level one quotes for futures.
 
+This is a working market-data stream, not a futures order-entry API.
+
 .. automethod:: schwab.streaming::StreamClient.level_one_futures_subs
 .. automethod:: schwab.streaming::StreamClient.level_one_futures_unsubs
 .. automethod:: schwab.streaming::StreamClient.level_one_futures_add
@@ -918,6 +946,8 @@ Futures Options Quotes
 ----------------------
 
 Level one quotes for futures options.
+
+This is a working market-data stream, not a futures-options order-entry API.
 
 .. automethod:: schwab.streaming::StreamClient.level_one_futures_options_subs
 .. automethod:: schwab.streaming::StreamClient.level_one_futures_options_unsubs
@@ -962,14 +992,13 @@ engineered. While the labeled data represents a best-effort attempt to
 interpret stream fields, it's possible that something is wrong or incorrectly
 labeled.
 
-The documentation lists more book types than are implemented here. In
-particular, it also lists ``FOREX_BOOK``, ``FUTURES_BOOK``, and
-``FUTURES_OPTIONS_BOOK`` as accessible streams. All experimentation has resulted
-in these streams refusing to connect, typically returning errors about
-unavailable services. Due to this behavior and the lack of official
-documentation for book streams generally, ``schwab`` assumes these streams are not
-actually implemented, and so excludes them. If you have any insight into using
-them, please `let us know <https://github.com/neusse/Schwab-py-NG/issues>`__.
+Older predecessor documentation lists more book types than Schwab's current
+thirteen-service table and this client implement. In particular,
+``FOREX_BOOK``, ``FUTURES_BOOK``, and ``FUTURES_OPTIONS_BOOK`` appear in that
+older material. Attempts have returned unavailable-service errors rather than
+book data, so ``schwab`` treats them as unavailable and exposes no subscription
+methods for them. If Schwab begins returning populated payloads for one, please
+`let us know <https://github.com/neusse/Schwab-py-NG/issues>`__.
 
 
 -------------------------------------

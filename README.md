@@ -268,7 +268,7 @@ registering an app with Schwab and getting your first token.
 |---|---|
 | **Authentication** | Browser login, a manual flow for headless boxes and notebooks, a two-step flow for web backends, and token refresh handled for you |
 | **Market data** | Quotes, fundamentals, option chains, price history from one-minute through weekly bars—including locally aggregated hourly candles—movers, market hours, instrument lookup |
-| **Streaming** | Fourteen live-observed services over one websocket: level one equities, options, futures and forex; Nasdaq and NYSE order books; charts, screeners, news headlines, and your own account activity. News is an undocumented Schwab service that has delivered data in live captures and can change without notice. |
+| **Streaming** | Fourteen live-observed services over one websocket: level one equities, options, futures and forex; Nasdaq and NYSE order books; charts, screeners, news headlines, and your own account activity. Futures quote/chart streams provide market data only—Schwab does not support futures order entry through the Trader API. News is undocumented and can change without notice. |
 | **Orders** | Construction, placement, replacement, cancellation and preview, with templates for the common equity orders and option strategies |
 | **Accounts** | Balances, positions, orders and transaction history |
 | **Sync and async** | Swap `Client` for `AsyncClient`, add `await`, change nothing else |
@@ -286,6 +286,9 @@ A few things people ask for that Schwab's API does not offer:
 
 - **No paper trading.** Orders placed through this API are real.
 - **No historical options pricing.** Current chains only.
+- **No futures, futures-options, or forex order entry.** Their streaming quote
+  feeds—and futures minute bars—have returned populated market-data payloads,
+  but the Trader API does not accept orders for those products.
 - **No streaming time and sales.** Schwab does not implement the inherited
   `TIMESALE_EQUITY`, `TIMESALE_OPTIONS`, or `TIMESALE_FUTURES` services. Their
   compatibility methods remain in this library, but applications should not

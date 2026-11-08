@@ -5,6 +5,10 @@ single StreamClient can carry many services and symbols at the same time. This
 example registers all handlers first, then subscribes sequentially on that one
 connection.
 
+The futures and futures-options subscriptions below are market-data feeds.
+Schwab has returned populated quote and chart payloads for them, even though
+the Trader API does not support placing futures or futures-options orders.
+
 Set OPTION_SYMBOL and FUTURES_OPTION_SYMBOL to current contract symbols to
 enable the option-dependent examples. Contract symbols expire, so hard-coding
 sample values here would make an otherwise working example silently go stale.
@@ -198,6 +202,8 @@ async def subscribe(stream):
     """Subscribe to many independent services on the same connection."""
     # Level one is current quote state: best bid/ask, last, sizes, and related
     # fields. It is the usual feed for a live quote display or current model.
+    # Futures and forex here are quote feeds only; this example does not imply
+    # that Schwab accepts futures, futures-options, or forex orders by API.
     await stream.level_one_equity_subs(EQUITIES)
     await stream.level_one_futures_subs(FUTURES)
     await stream.level_one_forex_subs(FOREX)
