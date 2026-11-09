@@ -312,19 +312,23 @@ expect all their parameters to be of type ``OrderBuilder``. You can construct
 these orders using the templates above or by
 :ref:`creating them from scratch <order_builder>`.
 
-Pass the ``OrderBuilder`` objects themselves, unbuilt and unplaced:
+Build the constituent orders, combine their ``OrderBuilder`` objects, build the
+completed composite, and then submit that composite with exactly one
+``place_order`` call. In expanded form:
 
 .. code-block:: python
 
   from schwab.orders.common import first_triggers_second
   from schwab.orders.equities import equity_buy_limit, equity_sell_limit
 
-  c.place_order(
-      account_hash,
-      first_triggers_second(
-          equity_buy_limit('GOOG', 1, '1250.00'),
-          equity_sell_limit('GOOG', 1, '1400.00'),
-      ).build())
+  # These are descriptions only. Nothing has been sent to Schwab.
+  entry_builder = equity_buy_limit('GOOG', 1, '1250.00')
+  exit_builder = equity_sell_limit('GOOG', 1, '1400.00')
+
+  # Compose first, then build and place the one completed order.
+  composite_builder = first_triggers_second(entry_builder, exit_builder)
+  composite_order = composite_builder.build()
+  c.place_order(account_hash, composite_order)
 
 **Do not place the constituent orders first and pass the results.** This is
 the mistake worth naming, because the first half of it succeeds:
@@ -342,6 +346,12 @@ expects ``OrderBuilder`` objects --- both orders have already been placed
 independently, with none of the trigger relationship you wanted. An
 ``OrderBuilder`` describes an order without sending it, which is what makes
 the composite possible.
+
+The correct sequence, repeated: keep both constituent builders unbuilt and
+unplaced, pass those builders to ``first_triggers_second``, call ``build`` on
+the returned composite builder, and pass that one completed order to one
+``place_order`` call. There is no separate placement call for either
+constituent order.
 
 .. autofunction:: schwab.orders.common.one_cancels_other
 .. autofunction:: schwab.orders.common.first_triggers_second

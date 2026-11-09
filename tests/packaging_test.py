@@ -1803,6 +1803,28 @@ class DocExampleTest(unittest.TestCase):
         return templates
 
     @no_duplicates
+    def test_composite_order_recipe_places_one_completed_order(self):
+        """The Utility Methods recipe composes before it places anything."""
+        path = os.path.join(REPO_ROOT, 'docs', 'order-templates.rst')
+        with open(path, encoding='utf-8') as f:
+            contents = f.read()
+        recipes = [code for _, _, code in self.code_blocks_in([path])
+                   if 'composite_builder = first_triggers_second' in code]
+
+        self.assertEqual(1, len(recipes))
+        self.assertIn('The correct sequence, repeated:', contents)
+
+        client = MagicMock()
+        namespace = {'c': client, 'account_hash': 'account-hash'}
+        exec(compile(recipes[0], 'order-templates.rst', 'exec'), namespace)
+
+        client.place_order.assert_called_once()
+        account_hash, order_spec = client.place_order.call_args[0]
+        self.assertEqual('account-hash', account_hash)
+        self.assertEqual('TRIGGER', order_spec['orderStrategyType'])
+        self.assertEqual(1, len(order_spec['childOrderStrategies']))
+
+    @no_duplicates
     def test_every_documented_order_template_call_still_builds(self):
         """Documented template calls, executed rather than inspected.
 
