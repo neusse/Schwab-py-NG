@@ -58,6 +58,8 @@ Start with the [getting-started
 guide](https://neusse.github.io/Schwab-py-NG/getting-started.html), then use the
 [client](https://neusse.github.io/Schwab-py-NG/client.html),
 [streaming](https://neusse.github.io/Schwab-py-NG/streaming.html), and
+[guided order workflows](https://neusse.github.io/Schwab-py-NG/easy-orders.html),
+as well as the
 [order-builder](https://neusse.github.io/Schwab-py-NG/order-builder.html)
 references as needed.
 
@@ -228,6 +230,25 @@ c.place_order(account_hash, equity_buy_limit('AAPL', 10, '210.50'))
 
 The price is a string on purpose — see [Prices go out exactly as
 written](#prices-go-out-exactly-as-written).
+
+For preview-before-place, explicit live-order confirmation, sequential batches,
+and caller-owned order templates, use the [guided order
+workflow](https://neusse.github.io/Schwab-py-NG/easy-orders.html):
+
+```python
+from schwab.orders.easy import EasyOrders
+
+orders = EasyOrders(c, account_hash)
+order = orders.buy('AAPL', 10, limit_price='210.50')
+result = orders.place(order, confirm_live_order=True)
+if not result.placed:
+    result.preview_response.raise_for_status()
+result.place_response.raise_for_status()
+```
+
+Schwab preview validates an order; it is not paper trading. Opt-in bounded 429
+recovery is available with `c.set_rate_limit_retry(...)`, but returned order
+mutations are never automatically repeated.
 
 **4. Stream quotes**, with fields you can read.
 

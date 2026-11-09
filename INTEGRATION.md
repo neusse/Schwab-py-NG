@@ -1,7 +1,8 @@
 # Integration provenance
 
 Schwab-py-NG preserves Alex Golec's original Git history and MIT license while
-combining the strongest maintained fixes reviewed on 2026-11-02.
+combining the strongest maintained fixes reviewed on 2026-11-02, followed by
+focused integrations documented below.
 
 | Source | Reviewed tip | Integration decision |
 | --- | --- | --- |
@@ -9,6 +10,7 @@ combining the strongest maintained fixes reviewed on 2026-11-02.
 | `Hu1kSmash/schwaby` | `970a0b6` (5.2.0) | Primary hardened runtime and regression suite |
 | `jubishop/schwab-py` | `4d6c9d1` | Its Authlib 1.8/httpx2 migration is already present in the hardened runtime |
 | `yoshishima/schwab-py` | `5ec39c5` | Reviewed for token, streaming, order, and callback fixes; overlapping Windows/Linux fixes are already represented |
+| `neusse/Schwab_EZ_Orders` | `eca5829` (reviewed 2026-11-09) | Adapted its guided order workflow around NG's existing builders: preview-before-place, explicit live confirmation, batches, and caller-owned templates; did not copy its parallel order schema, client ownership, console UI, credential storage, or paper-trading claim |
 
 The NG distribution is named `schwab-py-ng`, but it deliberately installs the
 `schwab` Python package so existing applications can migrate without changing

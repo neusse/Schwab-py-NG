@@ -33,6 +33,23 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Guided order workflow and safe 429 recovery
+
+``schwab.orders.easy.EasyOrders`` adapts the useful workflow from the
+MIT-licensed ``neusse/Schwab_EZ_Orders`` prototype around NG's existing order
+builders. It adds convenient equity and bracket construction,
+preview-before-place, explicit live-order confirmation, sequential batches,
+and atomic caller-owned JSON templates. It does not own clients, credentials,
+tokens, template directories, or hidden order history. Documentation now says
+explicitly that Schwab preview is validation, not paper trading.
+
+``Client.set_rate_limit_retry`` and its async equivalent add opt-in, bounded
+recovery for returned 429 responses from safe GET requests and for a 429 during
+OAuth token refresh, before the requested operation was sent. ``Retry-After``
+is honored when Schwab supplies it; otherwise retries use capped exponential
+backoff. Returned POST, PUT and DELETE responses are never automatically
+repeated, so order mutations cannot be duplicated by the retry policy.
+
 ### Streaming support audit and futures clarification
 
 Every service presented by the many-feeds example was checked against

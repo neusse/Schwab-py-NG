@@ -260,6 +260,39 @@ specification can be set using this method:
 .. automethod:: schwab.client.Client.set_timeout
 
 
++++++++++++++++++++
+Rate-limit recovery
++++++++++++++++++++
+
+By default each client method makes one request and returns its response,
+including an HTTP 429. Applications which want bounded automatic recovery for
+safe reads can opt in:
+
+.. code-block:: python
+
+  client.set_rate_limit_retry(
+          max_retries=3,
+          backoff_factor=1.0,
+          max_delay=30.0)
+
+The client honors a valid ``Retry-After`` header. Without one it waits 1, 2,
+then 4 seconds in this example, with every delay capped at 30 seconds. The sync
+client sleeps normally; ``AsyncClient`` awaits without blocking its event loop.
+
+Only returned 429 responses from ``GET`` requests are repeated. A rate-limited
+OAuth token refresh is also retried for any method because the requested API
+operation has not been sent yet. A returned response from ``POST``, ``PUT`` or
+``DELETE`` is **never** repeated automatically: the library will not risk
+duplicating an order placement or guessing whether a replacement or
+cancellation took effect.
+
+Retrying does not replace request consolidation. Batch symbols into one
+:meth:`~schwab.client.Client.get_quotes` request where possible, and do not run
+parallel loops which recreate the same rate pressure.
+
+.. automethod:: schwab.client.Client.set_rate_limit_retry
+
+
 +++++++++
 Token Age
 +++++++++

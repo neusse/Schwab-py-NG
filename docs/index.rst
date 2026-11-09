@@ -69,6 +69,7 @@ New here? Start with :ref:`getting_started`, then :ref:`auth`.
   auth
   client
   streaming
+  easy-orders
   order-templates
   order-builder
   util

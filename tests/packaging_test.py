@@ -907,7 +907,8 @@ class DocCoverageTest(unittest.TestCase):
 
     MODULES = ('schwab.auth', 'schwab.client', 'schwab.streaming',
                'schwab.orders.generic', 'schwab.orders.common',
-               'schwab.orders.equities', 'schwab.orders.options',
+               'schwab.orders.easy', 'schwab.orders.equities',
+               'schwab.orders.options',
                'schwab.utils', 'schwab.debug', 'schwab.contrib.util')
 
     # Every other module in the package, and why it is not walked. A module
