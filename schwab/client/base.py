@@ -9,9 +9,11 @@ from enum import Enum
 
 import contextlib
 import datetime
+import email.utils
 import httpx2
 import inspect
 import json
+import math
 import os
 import schwab
 import warnings
@@ -62,6 +64,13 @@ class BaseClient(EnumEnforcer):
 
         # Set the default timeout configuration
         self.set_timeout(30.0)
+
+        # Rate-limit recovery is deliberately opt-in. Historically every
+        # method made one request and returned Schwab's response unchanged;
+        # callers which depend on seeing the first 429 keep that behavior.
+        self._rate_limit_max_retries = 0
+        self._rate_limit_backoff_factor = 1.0
+        self._rate_limit_max_delay = 60.0
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
     # of utcnow(). To avoid being confused by this, these are the values
@@ -400,6 +409,88 @@ class BaseClient(EnumEnforcer):
                         `here <https://github.com/pydantic/httpx2/blob/main/
                         docs/advanced/timeouts.md>`__ for examples.'''
         self.session.timeout = timeout
+
+    def set_rate_limit_retry(self, max_retries=2, *, backoff_factor=1.0,
+                             max_delay=60.0):
+        '''Configure bounded recovery from HTTP 429 rate limits.
+
+        Recovery is disabled by default. Once enabled, ordinary ``GET``
+        requests which return 429 are repeated up to ``max_retries`` times.
+        A 429 while refreshing the OAuth token is also retried, for every HTTP
+        method, because the requested API operation has not been sent yet.
+
+        Returned 429 responses from ``POST``, ``PUT`` and ``DELETE`` requests
+        are never repeated automatically. In particular, this client never
+        guesses whether an order placement, replacement or cancellation took
+        effect.
+
+        A non-negative numeric ``Retry-After`` header is honored, including an
+        HTTP date. Without one, the delay is ``backoff_factor * 2**n`` seconds,
+        capped at ``max_delay``. Set ``max_retries`` to zero to disable the
+        behavior again.
+
+        :param max_retries: Number of attempts after the original request.
+        :param backoff_factor: Initial fallback delay in seconds.
+        :param max_delay: Maximum sleep between attempts, in seconds.
+        '''
+        if (isinstance(max_retries, bool)
+                or not isinstance(max_retries, int)
+                or max_retries < 0):
+            raise ValueError('max_retries must be a non-negative integer')
+
+        for name, value in (('backoff_factor', backoff_factor),
+                            ('max_delay', max_delay)):
+            if (isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(value)
+                    or value < 0):
+                raise ValueError(
+                        '{} must be a finite non-negative number'.format(name))
+
+        self._rate_limit_max_retries = max_retries
+        self._rate_limit_backoff_factor = float(backoff_factor)
+        self._rate_limit_max_delay = float(max_delay)
+
+    def _rate_limit_retry_delay(self, retry_number, response=None):
+        '''Return the delay before a numbered retry, capped by configuration.'''
+        retry_after = None
+        if response is not None:
+            retry_after = response.headers.get('Retry-After')
+
+        if retry_after is not None:
+            try:
+                delay = float(retry_after)
+            except (TypeError, ValueError):
+                try:
+                    when = email.utils.parsedate_to_datetime(retry_after)
+                    if when.tzinfo is None:
+                        when = when.replace(tzinfo=datetime.timezone.utc)
+                    delay = max(0.0, (when - datetime.datetime.now(
+                        datetime.timezone.utc)).total_seconds())
+                except (TypeError, ValueError, OverflowError):
+                    delay = None
+            else:
+                if not math.isfinite(delay) or delay < 0:
+                    delay = None
+        else:
+            delay = None
+
+        if delay is None:
+            try:
+                delay = self._rate_limit_backoff_factor * (2 ** retry_number)
+            except OverflowError:
+                delay = self._rate_limit_max_delay
+        return min(delay, self._rate_limit_max_delay)
+
+    def _can_retry_rate_limit(self, retry_number):
+        return retry_number < self._rate_limit_max_retries
+
+    def _log_rate_limit_retry(self, delay, retry_number, *, token_refresh):
+        source = 'OAuth token refresh' if token_refresh else 'API request'
+        self.logger.warning(
+                '%s was rate limited; retrying in %.3f seconds '
+                '(retry %s of %s)', source, delay, retry_number + 1,
+                self._rate_limit_max_retries)
 
     def token_age(self):
         '''Get the age of the token used to create this client, in seconds. For 

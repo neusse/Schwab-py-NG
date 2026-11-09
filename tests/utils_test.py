@@ -1000,6 +1000,8 @@ class UtilsTest(unittest.TestCase):
             'UnsafeCallbackPortError': ('m',),
             'BrowserLaunchError': ('m',),
             'InvalidOrderException': ('m',),
+            'LiveOrderConfirmationError': ('m',),
+            'OrderTemplateError': ('m',),
             'UnusableDecimalScale': ('m',),
             'UnparsableMessageData': ('m',),
         }
