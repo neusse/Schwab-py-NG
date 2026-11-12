@@ -33,6 +33,21 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Streaming connection replacement races
+
+Concurrent logins on one ``StreamClient`` are now serialized, and queued
+requests, login cleanup, and logout cleanup stay bound to the websocket
+connection on which they began. Stale work raises
+``StreamConnectionReplacedError`` instead of crossing onto or closing a newer
+connection. Deterministic regression tests cover concurrent login, a queued
+subscription during relogin, closing during login, and an old logout completing
+after replacement.
+
+Yoshishima identified and fixed the same class of race in
+[`TalkToChuck`](https://github.com/yoshishima/TalkToChuck/commit/44c0bd1f5f3c60407329d2617e70f98ece4ba63a);
+NG adapts that connection-generation design to its single-pending-request
+stream router.
+
 ### EXTO overnight-order support boundary
 
 The order-builder guide now distinguishes thinkorswim's 24/5 ``EXTO`` session

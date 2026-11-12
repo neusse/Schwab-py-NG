@@ -600,6 +600,16 @@ class ResponseTimeoutError(SchwabError):
         self.timeout = timeout
 
 
+class StreamConnectionReplacedError(SchwabError):
+    '''A streaming operation belonged to a connection which was replaced.
+
+    Raised instead of sending queued work on a newer websocket, or accepting
+    a response from a different streaming session. Retry the operation only
+    after the replacement login has completed and restore any subscriptions
+    the new connection needs.
+    '''
+
+
 # Returned by _read_and_route for a frame it delivered to a waiting request.
 # A plain None cannot serve: a top-level JSON null is a frame a server can
 # send, and treating it as "already routed" dropped it silently.
@@ -755,6 +765,13 @@ class StreamClient(EnumEnforcer):
         # response here rather than the reader having to be the requester.
         self._pending_request = None
 
+        # Every socket replacement gets a generation. Work records the current
+        # one before it waits on a lock, so it cannot wake later and send on a
+        # different connection. Login has its own lock because replacing the
+        # socket happens before the LOGIN request acquires _request_lock.
+        self._connection_generation = 0
+        self._login_lock = asyncio.Lock()
+
     def set_json_decoder(self, json_decoder):
         '''
         Sets a custom JSON decoder.
@@ -814,10 +831,29 @@ class StreamClient(EnumEnforcer):
         self.request_number += 1
         return self.request_number
 
-    async def _send(self, obj):
+    def _require_connection_generation(self, generation):
+        if generation != self._connection_generation:
+            raise StreamConnectionReplacedError(
+                'Stream connection was replaced before the operation '
+                'completed')
+
+    def _advance_connection_generation(self):
+        self._connection_generation += 1
+        self._fail_pending_request(StreamConnectionReplacedError(
+            'Stream connection was replaced before the operation completed'))
+        return self._connection_generation
+
+    async def _send(self, obj, *, connection_generation=None):
+        if connection_generation is not None:
+            self._require_connection_generation(connection_generation)
         if self._socket is None:
             raise ValueError(
                 'Socket not open. Did you forget to call login()?')
+
+        # Hold the object, not another read through self._socket after the
+        # await begins. A replacement closes this socket and the request fails
+        # on its own connection rather than crossing onto the new one.
+        socket = self._socket
 
         # Masked by key as well as by registered value: the LOGIN request
         # carries the access token, and this line is how it reached the logs.
@@ -825,7 +861,7 @@ class StreamClient(EnumEnforcer):
                 self.req_num(),
                 LazyLog(lambda: self._pretty(_redact.mask(obj))))
 
-        await self._socket.send(json.dumps(obj))
+        await socket.send(json.dumps(obj))
 
     async def _receive_from_socket(self):
         if self._socket is None:
@@ -899,6 +935,7 @@ class StreamClient(EnumEnforcer):
         # would otherwise drop a live websocket and its reader on the floor
         # with nothing closing it. Failure to close is logged, not raised: the
         # login is the operation the caller asked for.
+        generation = self._advance_connection_generation()
         previous, self._socket = self._socket, None
         if previous is not None:
             try:
@@ -908,8 +945,15 @@ class StreamClient(EnumEnforcer):
                         'Failed to close the previous stream connection while '
                         'logging in again. Continuing with the new one.')
 
-        self._socket = await ws_client.connect(
-                wss_url, **websocket_connect_args)
+        socket = await ws_client.connect(wss_url, **websocket_connect_args)
+        if generation != self._connection_generation:
+            try:
+                await socket.close()
+            finally:
+                raise StreamConnectionReplacedError(
+                    'Stream connection was replaced while login was opening '
+                    'its websocket')
+        self._socket = socket
 
         # Cleared *after* the new socket is in place, not before. Anything
         # still queued belongs to the connection being replaced: its exception
@@ -926,6 +970,7 @@ class StreamClient(EnumEnforcer):
         self._overflow_items.clear()
         self._absorbed = 0
         self._absorbed_kinds.clear()
+        return generation
 
 
     def _make_request(self, *, service, command, parameters):
@@ -1465,7 +1510,8 @@ class StreamClient(EnumEnforcer):
         if pending is not None and not pending[3].done():
             pending[3].set_exception(exception)
 
-    async def _await_response(self, request_id, service, command):
+    async def _await_response(self, request_id, service, command,
+                              connection_generation):
         '''
         Waits for the response to a request which has already been sent.
 
@@ -1492,6 +1538,7 @@ class StreamClient(EnumEnforcer):
                         self._response_timeout, service, command))
 
         while not future.done():
+            self._require_connection_generation(connection_generation)
             acquire = asyncio.ensure_future(self._read_lock.acquire())
             became_reader = False
 
@@ -1507,6 +1554,7 @@ class StreamClient(EnumEnforcer):
                 became_reader = acquire in done and not acquire.cancelled()
 
                 if became_reader:
+                    self._require_connection_generation(connection_generation)
                     if future.done():
                         break
                     try:
@@ -1541,6 +1589,7 @@ class StreamClient(EnumEnforcer):
                     if acquire.done() and not acquire.cancelled():
                         self._read_lock.release()
 
+        self._require_connection_generation(connection_generation)
         return future.result()
 
     async def _request_response(self, request, request_id, service, command):
@@ -1552,14 +1601,20 @@ class StreamClient(EnumEnforcer):
         continues while a request is in flight.
         '''
         cancelled = False
+        connection_generation = self._connection_generation
 
         try:
             async with self._request_lock:
+                self._require_connection_generation(connection_generation)
                 future = asyncio.get_running_loop().create_future()
                 self._pending_request = (request_id, service, command, future)
                 try:
-                    await self._send({'requests': [request]})
-                    await self._await_response(request_id, service, command)
+                    await self._send(
+                        {'requests': [request]},
+                        connection_generation=connection_generation)
+                    await self._await_response(
+                        request_id, service, command,
+                        connection_generation)
                 finally:
                     self._pending_request = None
                     # Nobody will look at this future again. Cancel it if it is
@@ -2276,6 +2331,11 @@ class StreamClient(EnumEnforcer):
                                        other two saying there is none.
         '''
 
+        async with self._login_lock:
+            await self._login(websocket_connect_args)
+
+    async def _login(self, websocket_connect_args):
+
         # Fetch required data and initialize the client
         r = self._client.get_user_preferences()
 
@@ -2286,7 +2346,7 @@ class StreamClient(EnumEnforcer):
         assert r.status_code == httpx2.codes.OK, r.raise_for_status()
         r = r.json()
 
-        await self._init_from_preferences(
+        connection_generation = await self._init_from_preferences(
                 r, websocket_connect_args if websocket_connect_args else {})
 
         # Build and send the request object
@@ -2301,7 +2361,18 @@ class StreamClient(EnumEnforcer):
         request, request_id = self._make_request(
             service='ADMIN', command='LOGIN',
             parameters=request_parameters)
-        await self._request_response(request, request_id, 'ADMIN', 'LOGIN')
+        try:
+            await self._request_response(
+                request, request_id, 'ADMIN', 'LOGIN')
+        except BaseException:
+            if connection_generation == self._connection_generation:
+                try:
+                    await self.close()
+                except Exception:
+                    self.logger.exception(
+                        'Failed to close stream after login failure. '
+                        'Preserving the login error.')
+            raise
 
     ##########################################################################
     # LOGOUT
@@ -2313,6 +2384,7 @@ class StreamClient(EnumEnforcer):
         are possible. The client must be re-initialized with :meth:`login` to
         perform further operations.
         '''
+        connection_generation = self._connection_generation
         request, request_id = self._make_request(
             service='ADMIN', command='LOGOUT',
             parameters={})
@@ -2320,35 +2392,42 @@ class StreamClient(EnumEnforcer):
             await self._request_response(
                     request, request_id, 'ADMIN', 'LOGOUT')
         finally:
-            # The stream is unusable after a logout whether or not the venue
-            # acknowledged it, so the socket is closed either way. A failure to
-            # close is logged rather than raised: it must not replace whatever
-            # went wrong with the logout itself, which is the more useful error.
-            try:
-                await self.close()
-            except Exception as exc:
-                self.logger.exception(
-                        'Failed to close the stream connection after logout.')
+            # A login may have replaced the socket while this logout was
+            # waiting. Cleanup belongs only to the connection on which the
+            # logout began; closing a newer one disconnects a healthy session.
+            if connection_generation == self._connection_generation:
+                # The stream is unusable after a logout whether or not the
+                # venue acknowledged it, so the socket is closed either way. A
+                # failure to close is logged rather than raised: it must not
+                # replace whatever went wrong with the logout itself, which is
+                # the more useful error.
                 try:
-                    await self._report_error(exc)
-                except asyncio.CancelledError:
-                    # Not swallowed with the rest. Discarding a cancellation
-                    # makes logout() refuse to die -- a supervisor or TaskGroup
-                    # calling cancel() during shutdown would find this task
-                    # running to completion regardless, which is a worse
-                    # outcome than the masking the guard below prevents.
-                    raise
-                except BaseException:
-                    # BaseException is deliberately left to propagate out of
-                    # _report_error everywhere else. Not here: this is the
-                    # finally clause whose whole point is that a close failure
-                    # must not replace whatever went wrong with the logout, and
-                    # an error handler raising SystemExit would do exactly
-                    # that. Reporting is the least important thing happening
-                    # here.
+                    await self.close()
+                except Exception as exc:
                     self.logger.exception(
-                            'Error handler raised while reporting a close '
-                            'failure. Ignoring it.')
+                            'Failed to close the stream connection after '
+                            'logout.')
+                    try:
+                        await self._report_error(exc)
+                    except asyncio.CancelledError:
+                        # Not swallowed with the rest. Discarding a
+                        # cancellation makes logout() refuse to die -- a
+                        # supervisor or TaskGroup calling cancel() during
+                        # shutdown would find this task running to completion
+                        # regardless, which is a worse outcome than the masking
+                        # the guard below prevents.
+                        raise
+                    except BaseException:
+                        # BaseException is deliberately left to propagate out
+                        # of _report_error everywhere else. Not here: this is
+                        # the finally clause whose whole point is that a close
+                        # failure must not replace whatever went wrong with the
+                        # logout, and an error handler raising SystemExit would
+                        # do exactly that. Reporting is the least important
+                        # thing happening here.
+                        self.logger.exception(
+                                'Error handler raised while reporting a close '
+                                'failure. Ignoring it.')
 
 
     async def close(self):
@@ -2363,6 +2442,7 @@ class StreamClient(EnumEnforcer):
         The client must be re-initialized with :meth:`login` to perform further
         operations.
         '''
+        self._advance_connection_generation()
         socket, self._socket = self._socket, None
 
         # Anything still queued belongs to the session being torn down. Its

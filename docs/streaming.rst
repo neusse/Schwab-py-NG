@@ -245,6 +245,15 @@ Pass ``None`` to wait indefinitely. Note that the websockets keepalive does not
 cover this case: a connection which is alive but simply not answering keeps
 replying to pings, so without a timeout such a request would wait forever.
 
+Calls to :meth:`~schwab.streaming.StreamClient.login` on the same client are
+serialized. A later login cleanly replaces the earlier connection after that
+login finishes, rather than letting two connection attempts overwrite or leak
+each other's sockets. Requests queued on the earlier connection do not cross
+onto the replacement: they raise
+:class:`~schwab.streaming.StreamConnectionReplacedError` and may be retried
+after the new login completes. Likewise, cleanup from an older login or logout
+never closes the newer connection.
+
 
 -----------------------
 Logging Out and Closing
@@ -566,10 +575,14 @@ Streaming exceptions
 ~~~~~~~~~~~~~~~~~~~~
 
 The exceptions a stream raises, and the ones it hands to
-:meth:`~schwab.streaming.StreamClient.add_error_handler` instead. The first
-three are raised by a request --- a login, a subscribe, a logout ---
-and :class:`~schwab.streaming.UnexpectedResponseCode` also reaches the error
-handler when Schwab refuses a request that had already been abandoned.
+:meth:`~schwab.streaming.StreamClient.add_error_handler` instead.
+:class:`~schwab.streaming.ResponseTimeoutError`,
+:class:`~schwab.streaming.StreamConnectionReplacedError`,
+:class:`~schwab.streaming.UnexpectedResponse`, and
+:class:`~schwab.streaming.UnexpectedResponseCode` are raised by a request ---
+a login, a subscribe, a logout --- and ``UnexpectedResponseCode`` also reaches
+the error handler when Schwab refuses a request that had already been
+abandoned.
 :class:`~schwab.streaming.UnparsableMessage` is raised by
 :meth:`~schwab.streaming.StreamClient.handle_message`, or by the request
 waiting when the frame arrived, *and* reported.
@@ -578,6 +591,7 @@ reported, so an ``except`` clause for it never runs. Every one inherits
 :class:`~schwab.utils.SchwabError`.
 
 .. autoexception:: schwab.streaming.ResponseTimeoutError
+.. autoexception:: schwab.streaming.StreamConnectionReplacedError
 .. autoexception:: schwab.streaming.UnexpectedResponse
 .. autoexception:: schwab.streaming.UnexpectedResponseCode
 .. autoexception:: schwab.streaming.UnparsableMessage

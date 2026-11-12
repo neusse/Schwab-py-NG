@@ -9,14 +9,14 @@ focused integrations documented below.
 | `alexgolec/schwab-py` | `43c4614` | Git-history base, `schwab` import compatibility, and original attribution |
 | `Hu1kSmash/schwaby` | `970a0b6` (5.2.0) | Primary hardened runtime and regression suite |
 | `jubishop/schwab-py` | `4d6c9d1` | Its Authlib 1.8/httpx2 migration is already present in the hardened runtime |
-| `yoshishima/schwab-py` | `5ec39c5` | Reviewed for token, streaming, order, and callback fixes; overlapping Windows/Linux fixes are already represented |
+| [`yoshishima/TalkToChuck`](https://github.com/yoshishima/TalkToChuck) (then `yoshishima/schwab-py`) | `5ec39c5` (initial review); `44c0bd1` (focused review 2026-11-12) | Reviewed for token, streaming, order, and callback fixes; overlapping Windows/Linux fixes were already represented, and the later websocket connection-generation design was adapted to NG's single-pending-request router |
 | `neusse/Schwab_EZ_Orders` | `eca5829` (reviewed 2026-11-09) | Adapted its guided order workflow around NG's existing builders: preview-before-place, explicit live confirmation, batches, and caller-owned templates; did not copy its parallel order schema, client ownership, console UI, credential storage, or paper-trading claim |
 
 The NG distribution is named `schwab-py-ng`, but it deliberately installs the
 `schwab` Python package so existing applications can migrate without changing
 imports. It therefore cannot coexist in one environment with `schwab-py`.
 
-macOS-specific callback-server changes from the Yoshishima fork are outside
+macOS-specific callback-server changes from TalkToChuck are outside
 this project's supported scope. Windows and Linux are the target platforms.
 
 The historical `schwaby` changelog is retained verbatim below an NG provenance

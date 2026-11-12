@@ -8402,6 +8402,128 @@ class StreamClientTest(IsolatedAsyncioTestCase):
         self.assertIsNot(first, self.client._socket)
 
     @no_duplicates
+    async def test_concurrent_logins_are_serialized(self):
+        self.http_client.get_user_preferences.return_value = MockResponse(
+            account_preferences(), 200)
+        sockets = [AsyncMock(), AsyncMock()]
+        first_connect_started = asyncio.Event()
+        allow_first_connect = asyncio.Event()
+        connect_calls = 0
+
+        for socket in sockets:
+            incoming = asyncio.Queue()
+
+            async def send(raw, incoming=incoming):
+                request = json.loads(raw)['requests'][0]
+                await incoming.put(json.dumps(self.success_response(
+                    request['requestid'], request['service'],
+                    request['command'])))
+
+            socket.send.side_effect = send
+            socket.recv.side_effect = incoming.get
+
+        async def connect(*args, **kwargs):
+            nonlocal connect_calls
+            index = connect_calls
+            connect_calls += 1
+            if index == 0:
+                first_connect_started.set()
+                await allow_first_connect.wait()
+            return sockets[index]
+
+        with patch('schwab.streaming.ws_client.connect', side_effect=connect):
+            first = asyncio.create_task(self.client.login())
+            await first_connect_started.wait()
+            second = asyncio.create_task(self.client.login())
+            await asyncio.sleep(0)
+            calls_before_first_finished = connect_calls
+            allow_first_connect.set()
+            await asyncio.wait_for(asyncio.gather(first, second), 5)
+
+        self.assertEqual(calls_before_first_finished, 1)
+        sockets[0].close.assert_awaited_once()
+        self.assertIs(self.client._socket, sockets[1])
+        await self.client.close()
+
+    @no_duplicates
+    async def test_close_during_login_does_not_resurrect_socket(self):
+        self.http_client.get_user_preferences.return_value = MockResponse(
+            account_preferences(), 200)
+        socket = AsyncMock()
+        connect_started = asyncio.Event()
+        finish_connect = asyncio.Event()
+
+        async def connect(*args, **kwargs):
+            connect_started.set()
+            await finish_connect.wait()
+            return socket
+
+        with patch('schwab.streaming.ws_client.connect', side_effect=connect):
+            task = asyncio.create_task(self.client.login())
+            await connect_started.wait()
+            await self.client.close()
+            finish_connect.set()
+            with self.assertRaises(
+                    streaming.StreamConnectionReplacedError):
+                await task
+
+        socket.close.assert_awaited_once()
+        self.assertIsNone(self.client._socket)
+
+    @no_duplicates
+    async def test_request_queued_before_relogin_stays_on_old_connection(self):
+        old_socket = self.client._socket = AsyncMock()
+        new_socket = AsyncMock()
+        self.client._send = AsyncMock()
+        self.client._await_response = AsyncMock()
+        await self.client._request_lock.acquire()
+
+        task = asyncio.create_task(
+            self.client.level_one_equity_subs(['AAPL']))
+        await asyncio.sleep(0)
+
+        with patch('schwab.streaming.ws_client.connect',
+                   new=AsyncMock(return_value=new_socket)):
+            await self.client._init_from_preferences(
+                account_preferences(), {})
+        self.client._request_lock.release()
+
+        with self.assertRaises(streaming.StreamConnectionReplacedError):
+            await task
+        self.client._send.assert_not_awaited()
+        old_socket.close.assert_awaited_once()
+        self.assertIs(self.client._socket, new_socket)
+        await self.client.close()
+
+    @no_duplicates
+    async def test_old_logout_does_not_close_replacement_socket(self):
+        old_socket = self.client._socket = AsyncMock()
+        new_socket = AsyncMock()
+        logout_started = asyncio.Event()
+        finish_logout = asyncio.Event()
+
+        async def delayed_logout(*args, **kwargs):
+            logout_started.set()
+            await finish_logout.wait()
+
+        self.client._request_response = AsyncMock(
+            side_effect=delayed_logout)
+        task = asyncio.create_task(self.client.logout())
+        await logout_started.wait()
+
+        with patch('schwab.streaming.ws_client.connect',
+                   new=AsyncMock(return_value=new_socket)):
+            await self.client._init_from_preferences(
+                account_preferences(), {})
+        finish_logout.set()
+        await task
+
+        old_socket.close.assert_awaited_once()
+        new_socket.close.assert_not_awaited()
+        self.assertIs(self.client._socket, new_socket)
+        await self.client.close()
+
+    @no_duplicates
     @patch('schwab.streaming.ws_client.connect', new_callable=AsyncMock)
     async def test_both_framings_survive_a_malformed_element(self, ws_connect):
         # The contract is that a late rejection behaves the same whether Schwab
