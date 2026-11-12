@@ -385,9 +385,10 @@ MIT-licensed library by Alex Golec. Its hardened runtime is derived primarily
 from [Hu1kSmash/schwaby](https://github.com/Hu1kSmash/schwaby) 5.2.0, including
 its token, logging, streaming, order-validation, and test-suite improvements.
 The focused changes in [jubishop/schwab-py](https://github.com/jubishop/schwab-py)
-and [yoshishima/schwab-py](https://github.com/yoshishima/schwab-py) were also
-reviewed; overlapping fixes are credited through their source histories and
-summarized in [INTEGRATION.md](INTEGRATION.md).
+and [yoshishima/TalkToChuck](https://github.com/yoshishima/TalkToChuck), then
+named `yoshishima/schwab-py`, were also reviewed; overlapping fixes are
+credited through their source histories and summarized in
+[INTEGRATION.md](INTEGRATION.md).
 
 It became a separate project for a practical reason rather than a philosophical one.
 This client runs systematic strategies against funded accounts, and that use imposes

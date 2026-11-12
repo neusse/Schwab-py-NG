@@ -985,6 +985,7 @@ class UtilsTest(unittest.TestCase):
             # compare '' to '' and pass regardless.
             'UnusableMessage': ('frame', 'm'),
             'ResponseTimeoutError': ('svc', 'cmd', 60, 'm'),
+            'StreamConnectionReplacedError': ('m',),
             'UnsuccessfulOrderException': (r(), 'm'),
             'OrderIdNotFoundError': (r(), None, 'm'),
             'MissingLocationHeaderError': (r(), None, 'm'),
