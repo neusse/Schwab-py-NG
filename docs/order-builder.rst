@@ -276,6 +276,31 @@ these methods to do so.
   interface would have placed under the same label. Venue-observed in live
   trading.
 
+.. warning::
+
+  **Schwab's public Trader API does not currently accept the** ``EXTO``
+  **overnight session.** Schwab offers 24/5 ``EXTO`` trading for eligible
+  securities only through its thinkorswim platforms. Orders created there can
+  appear in :meth:`~schwab.client.Client.get_orders_for_account` responses
+  with ``"session": "EXTO"``, because the order-query endpoint returns raw
+  JSON from the account. That does not mean the public placement endpoint
+  accepts the value.
+
+  Live-account checks on 2026-11-12 found that both ``POST /previewOrder`` and
+  ``POST /orders`` rejected ``EXTO`` with ``HTTP 400`` and ``Invalid value
+  'EXTO'``, including for overnight-eligible securities. This library
+  therefore does not expose ``Session.EXTO`` for order construction. Use
+  ``Session.SEAMLESS`` for supported pre-market, normal-market, and
+  after-market participation; it does not include the overnight session.
+
+  There is deliberately no automatic ``EXTO`` to ``SEAMLESS`` fallback. Such
+  a fallback would silently change a requested 24-hour order into a shorter
+  order. Revisit this boundary only if Schwab enables ``EXTO`` on the public
+  Trader API. See Schwab's `extended-hours trading documentation
+  <https://www.schwab.com/stocks/extended-hours-trading>`__ and the
+  `live-validation record
+  <https://github.com/neusse/Schwab-py-NG/issues/8>`__.
+
 .. autoclass:: schwab.orders.common::Session
   :members:
   :undoc-members:
