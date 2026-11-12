@@ -33,6 +33,14 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### EXTO overnight-order support boundary
+
+The order-builder guide now distinguishes thinkorswim's 24/5 ``EXTO`` session
+from the public Trader API. Retrieved raw order JSON may contain ``EXTO`` for
+orders created in thinkorswim, but current public preview and placement calls
+reject it. ``Session.EXTO`` and automatic fallback to the shorter ``SEAMLESS``
+session are intentionally not provided.
+
 ### Guided order workflow and safe 429 recovery
 
 ``schwab.orders.easy.EasyOrders`` adapts the useful workflow from the
