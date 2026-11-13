@@ -172,16 +172,29 @@ new authorization:
 
 The command reads ``SCHWAB_API_KEY``, ``SCHWAB_APP_SECRET``,
 ``SCHWAB_CALLBACK_URL``, and ``SCHWAB_TOKEN_PATH`` (lower-case spellings are
-also accepted). It deliberately uses the manual flow above: open the printed
-Schwab URL, sign in and complete MFA on Schwab's site, approve the application,
-then paste the entire redirected callback URL into the terminal. Treat that URL
-as a short-lived secret.
+also accepted). It uses :func:`~schwab.auth.easy_client` with a new staging
+token path, which forces full OAuth rather than loading or refreshing the
+existing token. ``easy_client`` opens the Schwab login, captures the browser
+callback, and exchanges the returned authorization code automatically. Its
+normal copy/paste fallback remains available if automatic browser or
+callback capture fails.
+
+Before asking for replacement confirmation, the command reports:
+
+* whether the configured token file is missing or unreadable;
+* when the current access token next needs refresh, if ``expires_at`` exists;
+* the estimated seven-day refresh-token/full-OAuth expiry; and
+* whether that full expiry has already passed.
+
+The report never changes the action: this command performs full OAuth only. It
+does not refresh a token even when a refresh would still be sufficient.
 
 If a token file already exists, the command asks before replacing it; ``--yes``
 skips that confirmation. It does not delete the old file first. Cancellation,
 a failed sign-in, a rejected exchange, or an invalid callback therefore leaves
-the existing token untouched. Only a successful exchange reaches NG's atomic
-token writer and replaces the file. ``--token-path`` and ``--callback-url`` can
+the existing token untouched. The successful ``easy_client`` result is first
+written to a staging path; only then does NG's atomic token writer replace the
+real file. ``--token-path`` and ``--callback-url`` can
 override their corresponding environment values; the API key and app secret
 remain environment-only so they do not enter shell history or process lists.
 

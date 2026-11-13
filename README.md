@@ -81,10 +81,14 @@ schwab-ng candles AAPL --every hour --days 5 --csv aapl-hourly.csv
 ```
 
 Set `SCHWAB_TOKEN_PATH`, `SCHWAB_API_KEY`, and `SCHWAB_APP_SECRET` first.
-`schwab-fetch-new-token` additionally uses `SCHWAB_CALLBACK_URL` and performs a
-complete manual/copy-paste OAuth authorization when the refresh token has fully
-expired. It is not a refresh. An existing token is left untouched unless the
-new authorization succeeds; use `--yes` to skip its replacement confirmation.
+`schwab-fetch-new-token` additionally uses `SCHWAB_CALLBACK_URL`, reports the
+next access-token refresh and estimated seven-day refresh-token expiry, then
+uses `easy_client` for a complete browser OAuth authorization. The callback and
+authorization code are normally captured and exchanged automatically; the
+existing `easy_client` copy/paste fallback remains available if automatic
+capture fails. This command never performs a refresh. An existing token is
+left untouched unless the new authorization succeeds; use `--yes` to skip its
+replacement confirmation.
 Tables identify accounts the same way the Schwab web interface does (`...570`)
 without printing account hashes or full numbers. See the [CLI workflows and
 known Trader API visibility
