@@ -53,6 +53,19 @@ coverage behind individual changes.
 | Logging | Medium | Custom handlers and error-tracking integrations |
 | Market data | Medium | Exact response ranges and exact-key schemas |
 
+## Additive application utilities
+
+The ``schwab.contrib.account``, ``schwab.contrib.export``,
+``schwab.contrib.market_data``, and ``schwab.contrib.streaming`` modules and
+the ``schwab-ng-doctor`` command are additive. Existing client return values,
+stream handlers, and subscription methods are unchanged. No pandas, Rich,
+yfinance, Alpaca, matplotlib, GUI, or strategy dependency is installed.
+
+The utilities deliberately do not reproduce several behaviors from the old
+``schwab-py-extra`` experiments: they do not create or cache clients, persist
+environment variables, manually refresh or delete token files, reveal token
+suffixes or account numbers, or write databases from the shared stream reader.
+
 ## Installation and runtime
 
 ### The two distributions cannot share an environment

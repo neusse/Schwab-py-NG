@@ -63,6 +63,14 @@ as well as the
 [order-builder](https://neusse.github.io/Schwab-py-NG/order-builder.html)
 references as needed.
 
+NG also includes dependency-free [application
+utilities](https://neusse.github.io/Schwab-py-NG/utilities.html) for safe
+installation and token diagnostics, normalized account positions, stable
+order and transaction CSV rows, quote/candle conversion, bounded streaming
+state, and off-reader storage queues. Run `schwab-ng-doctor` after installation
+to detect a mixed `schwab-py`/`schwab-py-ng` environment before it corrupts an
+import.
+
 Migrating an existing program from the original `schwab-py`? Read
 **[Compatibility Changes](COMPATIBILITY_CHANGES.md)** before installing. It
 collects the API, dependency, streaming, order, authentication, and operational
