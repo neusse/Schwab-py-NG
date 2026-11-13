@@ -57,9 +57,17 @@ coverage behind individual changes.
 
 The ``schwab.contrib.account``, ``schwab.contrib.export``,
 ``schwab.contrib.market_data``, and ``schwab.contrib.streaming`` modules and
-the ``schwab-ng-doctor`` command are additive. Existing client return values,
+the ``schwab-ng`` command family are additive. Existing client return values,
 stream handlers, and subscription methods are unchanged. No pandas, Rich,
 yfinance, Alpaca, matplotlib, GUI, or strategy dependency is installed.
+
+The CLI uses ``...`` plus the last three account-number characters, matching
+Schwab's web display, and adds a separate ``account_suffix`` field to exported
+utility rows. The doctor performs live quote and account-discovery checks by
+default when its three environment values are present; use
+``schwab-ng doctor --offline`` for the earlier local-only behavior. These
+commands can refresh and rewrite the configured token file through the normal
+client refresh path, but do not otherwise manage credentials or resources.
 
 The utilities deliberately do not reproduce several behaviors from the old
 ``schwab-py-extra`` experiments: they do not create or cache clients, persist

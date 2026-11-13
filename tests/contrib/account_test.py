@@ -2,7 +2,7 @@ import decimal
 import unittest
 
 from schwab.contrib.account import (
-    account_snapshots, aggregate_positions, diff_positions,
+    account_snapshots, account_suffix, aggregate_positions, diff_positions,
     iter_position_rows, mask_account_number)
 
 from tests.utils import no_duplicates
@@ -33,8 +33,9 @@ class AccountTest(unittest.TestCase):
 
     @no_duplicates
     def test_masks_without_returning_a_short_value_in_full(self):
-        self.assertEqual('****5678', mask_account_number('12345678'))
-        self.assertEqual('****', mask_account_number('7'))
+        self.assertEqual('...678', mask_account_number('12345678'))
+        self.assertEqual('...', mask_account_number('7'))
+        self.assertEqual('678', account_suffix('12345678'))
         self.assertEqual('Unknown', mask_account_number(None))
         with self.assertRaises(ValueError):
             mask_account_number('123', True)
@@ -47,7 +48,8 @@ class AccountTest(unittest.TestCase):
         position['shortQuantity'] = '3.5'
         snapshot = account_snapshots(value)[0]
         self.assertEqual('stable-1', snapshot.identity.account_key)
-        self.assertEqual('****5678', snapshot.identity.display_label)
+        self.assertEqual('...678', snapshot.identity.display_label)
+        self.assertEqual('678', snapshot.identity.account_suffix)
         self.assertEqual(decimal.Decimal('-3.5'),
                          snapshot.positions[0].net_quantity)
 
@@ -92,7 +94,8 @@ class AccountTest(unittest.TestCase):
     @no_duplicates
     def test_rows_are_dataframe_and_csv_ready(self):
         row = next(iter_position_rows(payload()))
-        self.assertEqual('****5678', row['account'])
+        self.assertEqual('...678', row['account'])
+        self.assertEqual('678', row['account_suffix'])
         self.assertNotIn('account_key', row)
         self.assertEqual(decimal.Decimal('2'), row['net_quantity'])
         self.assertEqual('CUSIP-1', row['cusip'])
@@ -112,10 +115,13 @@ class AccountTest(unittest.TestCase):
     @no_duplicates
     def test_validation_and_zero_weight_aggregation(self):
         self.assertEqual('Unknown', mask_account_number(''))
-        self.assertEqual('****23', mask_account_number('123', visible=2))
-        for visible in (-1, 1.5):
+        self.assertEqual('...23', mask_account_number('123', visible=2))
+        for visible in (-1, 0, 1.5):
             with self.assertRaises(ValueError):
                 mask_account_number('123', visible)
+        self.assertEqual('', account_suffix(None))
+        with self.assertRaises(ValueError):
+            account_suffix('123', 0)
         for bad in (None, {'securitiesAccount': None}):
             with self.assertRaises(ValueError):
                 account_snapshots(bad)

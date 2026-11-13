@@ -16,6 +16,59 @@ They use only NG's existing runtime dependencies. Pandas, Rich, yfinance,
 Alpaca, matplotlib, GUI code, and strategy logic remain application concerns.
 
 
+Command-line workflows
+======================
+
+The installed ``schwab-ng`` command makes the common read-only workflows
+available without writing a Python script. Credentials come from
+``SCHWAB_TOKEN_PATH``, ``SCHWAB_API_KEY``, and ``SCHWAB_APP_SECRET``; secrets
+are not accepted as command-line arguments.
+
+.. code-block:: shell
+
+  schwab-ng doctor
+  schwab-ng orders --today
+  schwab-ng orders --today --account 570 --csv orders.csv
+  schwab-ng positions --account 570
+  schwab-ng transactions --days 7 --symbol AAPL --json
+  schwab-ng candles AAPL --every hour --days 5 --csv aapl-hourly.csv
+
+Orders, positions, and transactions query each linked account independently so
+every result can be labeled with the web interface convention, such as
+``...570``. ``--account`` accepts those last three characters. If two linked
+accounts share a suffix, the command refuses the ambiguous selection and asks
+for the full account number. Full numbers and account hashes are never written
+to tables, CSV, or JSON.
+
+Tables are the default. ``--csv PATH`` writes a file and ``--json`` produces
+machine-readable output. Order CSV and JSON retain the related order, leg,
+activity, and execution rows; the terminal table shows one useful summary per
+order and reports top-level orders separately from related export rows.
+Date-aware commands accept ``--today``, ``--days``, or inclusive
+``--from``/``--to`` dates. The standalone
+``schwab-ng-orders``, ``schwab-ng-positions``, ``schwab-ng-transactions``, and
+``schwab-ng-candles`` commands are aliases for the corresponding subcommands.
+Candle requests default to the last five days so an interactive command does
+not unexpectedly print decades of daily or weekly history.
+
+
+Trader API visibility is not web Order Status parity
+----------------------------------------------------
+
+The commands report only what Schwab's public Trader API returns. They do not
+scrape schwab.com and a zero-result response is described as exactly that,
+rather than as proof that no order exists.
+
+This difference was observed directly on 2026-11-13: Schwab web Order Status
+showed a filled, dollar-denominated SGOV market order in account ``...570`` at
+1:22 PM ET. Full-day calls to both the all-linked and per-account order
+endpoints returned zero orders, and the account transaction endpoint returned
+zero matching transactions. Dollar/fractional order handling is a plausible
+explanation, but Schwab has not confirmed it and this observation does not
+establish a universal rule. Reconcile important results with Schwab's own
+interface.
+
+
 Safe installation and token diagnostics
 =======================================
 
@@ -26,28 +79,46 @@ After installing NG, run:
   schwab-ng-doctor --token-path /path/to/token.json
 
 The doctor detects the corrupting case where both ``schwab-py`` and
-``schwab-py-ng`` are installed, checks the NG token shape and seven-day age,
-and inspects owner-only token permissions on POSIX. It never prints token
-fields, token suffixes, credentials, account identifiers, or response bodies.
+``schwab-py-ng`` are installed; reports Python, platform, timezone, import
+ownership, and every required runtime package version; checks token creation,
+refresh age, access expiry, writability, and owner-only permissions on POSIX;
+and can compare installed versions with PyPI. It never prints token values,
+credentials, full account identifiers, or response bodies.
 
-Connectivity is deliberately opt-in because building a client can refresh and
-rewrite the token:
+When all three environment values are present, the doctor also checks a quote
+and linked-account discovery by default. Building the client can refresh and
+rewrite the token. Use ``--offline`` to suppress live calls, or ``--connect``
+to require them and fail when credentials are incomplete:
 
 .. code-block:: shell
 
-  schwab-ng-doctor --connect \
-      --token-path /path/to/token.json
+  schwab-ng doctor --offline
+  schwab-ng doctor --connect --check-updates
 
 The arguments may instead come from ``SCHWAB_TOKEN_PATH``,
 ``SCHWAB_API_KEY``, and ``SCHWAB_APP_SECRET`` (lower-case spellings are also
 accepted). Credentials are intentionally not accepted as command-line options,
 where process listings and shell history could expose them. The quote response
-is checked and discarded. A failure names only its exception class; sensitive
-exception text is suppressed.
+is checked and discarded. Successful account discovery displays only the last
+three characters. A failure names only its exception class and HTTP status;
+sensitive exception text is suppressed. ``--json`` is suitable for automation.
 
 .. autoclass:: schwab.doctor.DoctorCheck
 .. autofunction:: schwab.doctor.run_checks
+.. autofunction:: schwab.doctor.configure_parser
+.. autofunction:: schwab.doctor.run_cli
 .. autofunction:: schwab.doctor.main
+
+.. autofunction:: schwab.cli.build_parser
+.. autofunction:: schwab.cli.main
+.. autofunction:: schwab.cli.run_orders
+.. autofunction:: schwab.cli.run_positions
+.. autofunction:: schwab.cli.run_transactions
+.. autofunction:: schwab.cli.run_candles
+.. autofunction:: schwab.cli.orders_main
+.. autofunction:: schwab.cli.positions_main
+.. autofunction:: schwab.cli.transactions_main
+.. autofunction:: schwab.cli.candles_main
 
 
 Accounts and positions
@@ -83,6 +154,7 @@ mistaken for a real account. Snapshot diffs retain additions, removals, and
 changes as separate before/after values.
 
 .. autofunction:: schwab.contrib.account.mask_account_number
+.. autofunction:: schwab.contrib.account.account_suffix
 .. autoclass:: schwab.contrib.account.AccountIdentity
 .. autoclass:: schwab.contrib.account.PositionIdentity
 .. autoclass:: schwab.contrib.account.Position
