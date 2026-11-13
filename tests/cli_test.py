@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import io
+import json
 import tempfile
 import unittest
 from enum import Enum
@@ -200,6 +201,55 @@ class CliTest(unittest.TestCase):
                 cli.run_fetch_new_token(args())
 
     @no_duplicates
+    def test_token_preflight_reports_missing_and_unreadable_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            missing = cli._token_preflight(path, now=1000)
+            self.assertIn('no token file', missing[0])
+            path.write_text('{not json', encoding='utf-8')
+            unreadable = cli._token_preflight(path, now=1000)
+            self.assertIn('cannot be read', unreadable[0])
+            self.assertIn('only after authorization succeeds', unreadable[1])
+
+    @no_duplicates
+    def test_token_preflight_reports_refresh_and_full_expiry_deadlines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            path.write_text(json.dumps({
+                'creation_timestamp': 1000,
+                'token': {'expires_at': 2000},
+            }), encoding='utf-8')
+            current = cli._token_preflight(path, now=1500)
+            self.assertIn('refresh required by', current[0])
+            self.assertIn('full expiry', current[1])
+            self.assertIn('not yet required', current[2])
+            expired = cli._token_preflight(path, now=700000)
+            self.assertIn('refresh is due', expired[0])
+            self.assertIn('fully expired', expired[1])
+            self.assertEqual('Full OAuth authorization is required.', expired[2])
+
+    @no_duplicates
+    def test_token_preflight_reports_missing_timestamps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            path.write_text(json.dumps({'token': {}}), encoding='utf-8')
+            messages = cli._token_preflight(path, now=1000)
+            self.assertIn('expires_at is missing', messages[0])
+            self.assertIn('creation_timestamp is missing', messages[1])
+
+    @no_duplicates
+    def test_token_preflight_handles_out_of_range_timestamps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            path.write_text(json.dumps({
+                'creation_timestamp': 1e300,
+                'token': {'expires_at': 1e300},
+            }), encoding='utf-8')
+            messages = cli._token_preflight(path, now=1000)
+            self.assertIn('outside the supported date range', messages[0])
+            self.assertIn('outside the supported date range', messages[1])
+
+    @no_duplicates
     def test_fetch_new_token_cancel_preserves_existing_file(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'token.json'
@@ -212,7 +262,7 @@ class CliTest(unittest.TestCase):
             }
             with patch('schwab.cli._environment', side_effect=environment.get), \
                  patch('builtins.input', return_value='no'), \
-                 patch('schwab.cli.auth.client_from_manual_flow') as flow, \
+                 patch('schwab.cli.auth.easy_client') as flow, \
                  patch('sys.stdout', new_callable=io.StringIO) as output:
                 result = cli.run_fetch_new_token(args())
             self.assertEqual(1, result)
@@ -222,7 +272,7 @@ class CliTest(unittest.TestCase):
             self.assertIn('was not changed', output.getvalue())
 
     @no_duplicates
-    def test_fetch_new_token_runs_full_manual_oauth_and_can_override_paths(self):
+    def test_fetch_new_token_uses_easy_client_staging_and_replaces_atomically(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'token.json'
             path.write_text('existing token', encoding='utf-8')
@@ -230,8 +280,17 @@ class CliTest(unittest.TestCase):
                 'SCHWAB_API_KEY': 'key',
                 'SCHWAB_APP_SECRET': 'secret',
             }
+            def easy_client(api_key, app_secret, callback_url,
+                            staged_path, **kwargs):
+                Path(staged_path).write_text(json.dumps({
+                    'creation_timestamp': 2000,
+                    'token': {'access_token': 'new-token',
+                              'expires_at': 3000},
+                }), encoding='utf-8')
+
             with patch('schwab.cli._environment', side_effect=environment.get), \
-                 patch('schwab.cli.auth.client_from_manual_flow') as flow, \
+                 patch('schwab.cli.auth.easy_client',
+                       side_effect=easy_client) as flow, \
                  patch('builtins.input') as prompt, \
                  patch('sys.stdout', new_callable=io.StringIO) as output:
                 result = cli.run_fetch_new_token(args(
@@ -239,10 +298,35 @@ class CliTest(unittest.TestCase):
                     callback_url='https://127.0.0.1:8182', yes=True))
             self.assertEqual(0, result)
             prompt.assert_not_called()
-            flow.assert_called_once_with(
-                'key', 'secret', 'https://127.0.0.1:8182', str(path))
+            call = flow.call_args
+            self.assertEqual(
+                ('key', 'secret', 'https://127.0.0.1:8182'), call.args[:3])
+            self.assertNotEqual(str(path), call.args[3])
+            self.assertEqual(0, call.kwargs['max_token_age'])
+            replaced = json.loads(path.read_text(encoding='utf-8'))
+            self.assertEqual('new-token', replaced['token']['access_token'])
             self.assertIn('full Schwab OAuth', output.getvalue())
-            self.assertIn('not a token refresh', output.getvalue())
+            self.assertIn('captured and exchanged automatically',
+                          output.getvalue())
+
+    @no_duplicates
+    def test_fetch_new_token_oauth_failure_preserves_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            path.write_text('existing token', encoding='utf-8')
+            environment = {
+                'SCHWAB_TOKEN_PATH': str(path),
+                'SCHWAB_CALLBACK_URL': 'https://127.0.0.1:8182',
+                'SCHWAB_API_KEY': 'key',
+                'SCHWAB_APP_SECRET': 'secret',
+            }
+            with patch('schwab.cli._environment', side_effect=environment.get), \
+                 patch('schwab.cli.auth.easy_client',
+                       side_effect=RuntimeError('login failed')):
+                with self.assertRaisesRegex(RuntimeError, 'login failed'):
+                    cli.run_fetch_new_token(args(yes=True))
+            self.assertEqual(
+                'existing token', path.read_text(encoding='utf-8'))
 
     @no_duplicates
     def test_fetch_new_token_refuses_a_directory(self):

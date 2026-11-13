@@ -4,8 +4,11 @@ import argparse
 import copy
 import datetime
 import json
+import math
 import os
 import sys
+import tempfile
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -52,6 +55,108 @@ def _oauth_settings(args):
             'missing {}; set the Schwab environment variables first'.format(
                 ', '.join(missing)))
     return values
+
+
+def _timestamp(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _deadline(value, now):
+    try:
+        local = datetime.datetime.fromtimestamp(
+            value, datetime.timezone.utc).astimezone()
+    except (OSError, OverflowError, ValueError):
+        return None
+    remaining = value - now
+    seconds = abs(int(remaining))
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes = seconds // 60
+    parts = []
+    if days:
+        parts.append('{}d'.format(days))
+    if hours or days:
+        parts.append('{}h'.format(hours))
+    parts.append('{}m'.format(minutes))
+    relative = 'in {}'.format(' '.join(parts)) if remaining > 0 else (
+        '{} ago'.format(' '.join(parts)))
+    return local.strftime('%Y-%m-%d %I:%M %p %Z'), relative, remaining
+
+
+def _token_preflight(token_path, now=None):
+    now = time.time() if now is None else now
+    if not token_path.exists():
+        return (
+            'Token preflight: no token file was found; full OAuth will create one.',
+        )
+    try:
+        with token_path.open(encoding='utf-8') as token_file:
+            data = json.load(token_file)
+        token = data['token']
+        if not isinstance(data, dict) or not isinstance(token, dict):
+            raise ValueError('invalid token shape')
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return (
+            'Token preflight: the existing token timing cannot be read.',
+            'Full OAuth will replace it only after authorization succeeds.',
+        )
+
+    messages = []
+    access_expiry = _timestamp(token.get('expires_at'))
+    if access_expiry is None:
+        messages.append(
+            'Next access-token refresh: unavailable (expires_at is missing or invalid).')
+    else:
+        deadline = _deadline(access_expiry, now)
+        if deadline is None:
+            messages.append(
+                'Next access-token refresh: unavailable '
+                '(expires_at is outside the supported date range).')
+            access_expiry = None
+        else:
+            formatted, relative, remaining = deadline
+            if remaining > 0:
+                messages.append(
+                    'Next access-token refresh required by: {} ({}).'.format(
+                        formatted, relative))
+            else:
+                messages.append(
+                    'Access-token refresh is due: {} ({}).'.format(
+                        formatted, relative))
+
+    created = _timestamp(data.get('creation_timestamp'))
+    if created is None:
+        messages.append(
+            'Estimated refresh-token full expiry: unavailable '
+            '(creation_timestamp is missing or invalid).')
+    else:
+        full_expiry = created + 7 * 24 * 60 * 60
+        deadline = _deadline(full_expiry, now)
+        if deadline is None:
+            messages.append(
+                'Estimated refresh-token full expiry: unavailable '
+                '(creation_timestamp is outside the supported date range).')
+        elif deadline[2] > 0:
+            formatted, relative, remaining = deadline
+            messages.append(
+                'Estimated refresh-token full expiry: {} ({}).'.format(
+                    formatted, relative))
+            messages.append(
+                'Full OAuth is not yet required by token age; this command '
+                'will still perform full OAuth only.')
+        else:
+            formatted, relative, remaining = deadline
+            messages.append(
+                'Refresh token is fully expired by the seven-day estimate: '
+                '{} ({}).'.format(formatted, relative))
+            messages.append('Full OAuth authorization is required.')
+    return tuple(messages)
 
 
 def _accounts(client, selector=None):
@@ -310,6 +415,9 @@ def run_fetch_new_token(args):
         raise RuntimeError('token directory does not exist: {}'.format(
             token_path.parent))
 
+    for message in _token_preflight(token_path):
+        print(message)
+
     if token_path.exists() and not args.yes:
         print('A token file already exists at: {}'.format(token_path))
         print('It will remain unchanged unless the full OAuth flow succeeds.')
@@ -318,11 +426,34 @@ def run_fetch_new_token(args):
             print('Token replacement canceled; the existing file was not changed.')
             return 1
 
-    print('Starting full Schwab OAuth authorization (not a token refresh).')
+    print('Starting full Schwab OAuth authorization with easy_client.')
+    print('The browser callback will be captured and exchanged automatically.')
     print('The existing token will be replaced only after a successful exchange.')
-    auth.client_from_manual_flow(
-        settings['SCHWAB_API_KEY'], settings['SCHWAB_APP_SECRET'],
-        settings['SCHWAB_CALLBACK_URL'], str(token_path))
+    # easy_client normally loads an existing token before deciding whether it
+    # is old. Give it a new staging path so this command can only take its full
+    # OAuth path, even when the real file is malformed or still refreshable.
+    # Staging also keeps the real token usable if login is canceled or fails.
+    with tempfile.TemporaryDirectory(
+            prefix='.schwab-full-oauth-', dir=token_path.parent) as directory:
+        staged_path = Path(directory) / 'token.json'
+        auth.easy_client(
+            settings['SCHWAB_API_KEY'], settings['SCHWAB_APP_SECRET'],
+            settings['SCHWAB_CALLBACK_URL'], str(staged_path),
+            max_token_age=0)
+        try:
+            with staged_path.open(encoding='utf-8') as token_file:
+                staged = json.load(token_file)
+            token = staged['token']
+            if (not isinstance(staged, dict)
+                    or not isinstance(token, dict)):
+                raise ValueError('staged token must be an object')
+        except (KeyError, OSError, TypeError, ValueError,
+                json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                'OAuth completed without producing a readable token') from exc
+        # Keep easy_client's creation_timestamp wrapper: token age helpers and
+        # later preflight reports depend on that metadata.
+        auth.token_file_writer(str(token_path))(staged)
     print('New Schwab authorization token saved to: {}'.format(token_path))
     return 0
 
@@ -353,7 +484,7 @@ def build_parser(prog='schwab-ng'):
 
     _configure_fetch_parser(commands.add_parser(
         'fetch-new-token',
-        help='replace an expired token through full manual OAuth'))
+        help='replace an expired token through full browser OAuth'))
 
     orders = commands.add_parser('orders', help='list or export orders')
     _account_argument(orders)
@@ -444,6 +575,6 @@ def fetch_new_token_main(argv=None):
     '''Run the standalone ``schwab-fetch-new-token`` command.'''
     parser = _configure_fetch_parser(argparse.ArgumentParser(
         prog='schwab-fetch-new-token',
-        description=('Replace an expired token through a complete manual '
+        description=('Replace an expired token through a complete browser '
                      'Schwab OAuth authorization.')))
     return _execute(parser, argv)

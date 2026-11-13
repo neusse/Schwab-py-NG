@@ -37,8 +37,10 @@ was measured, and every number, is unchanged.
 
 The installed ``schwab-fetch-new-token`` command (an ``.exe`` launcher on
 Windows) and equivalent ``schwab-ng fetch-new-token`` subcommand now replace a
-fully expired refresh token through the manual/copy-paste OAuth authorization
-flow. This is a complete new authorization, not a token refresh. It reads the
+fully expired refresh token through ``easy_client``'s complete browser OAuth
+authorization flow. The returned authorization code is normally captured and
+exchanged automatically, with the existing copy/paste fallback if capture
+fails. This is a complete new authorization, not a token refresh. It reads the
 configured callback URL and token path alongside the existing API environment
 values, confirms before replacing an existing token unless ``--yes`` is used,
 and never accepts the app secret on the command line.
@@ -47,6 +49,11 @@ Unlike the old ``schwab-py-extra`` experiment, the command does not delete the
 current token before starting OAuth. A canceled or failed authorization leaves
 the existing file untouched; the normal atomic writer replaces it only after a
 successful authorization-code exchange.
+
+Before confirmation, the command now reports a missing or unreadable token,
+the next access-token refresh deadline, the estimated seven-day refresh-token
+full expiry, and whether full OAuth is already required. The report is
+informational: this command always performs full OAuth and never refreshes.
 
 ### Installed CLI workflows and expanded doctor
 
