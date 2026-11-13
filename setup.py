@@ -133,6 +133,11 @@ setuptools.setup(
             'wheel',
         ]
     },
+    entry_points={
+        'console_scripts': [
+            'schwab-ng-doctor=schwab.doctor:main',
+        ],
+    },
     keywords='finance trading equities bonds options research',
     project_urls={
         'Documentation': 'https://neusse.github.io/Schwab-py-NG/',

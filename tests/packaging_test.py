@@ -156,6 +156,12 @@ class SetupPyTest(unittest.TestCase):
         self.assertEqual(['dev'], sorted(self.kwargs['extras_require']))
 
     @no_duplicates
+    def test_the_doctor_console_command_is_shipped(self):
+        self.assertEqual(
+            ['schwab-ng-doctor=schwab.doctor:main'],
+            self.kwargs['entry_points']['console_scripts'])
+
+    @no_duplicates
     def test_dev_has_the_plugins_setup_cfg_needs(self):
         # CONTRIBUTING runs the suite with `-n auto`, and setup.cfg sets
         # `timeout`. Without pytest-xdist the first is an unknown argument;
@@ -909,7 +915,10 @@ class DocCoverageTest(unittest.TestCase):
                'schwab.orders.generic', 'schwab.orders.common',
                'schwab.orders.easy', 'schwab.orders.equities',
                'schwab.orders.options',
-               'schwab.utils', 'schwab.debug', 'schwab.contrib.util')
+               'schwab.utils', 'schwab.debug', 'schwab.doctor',
+               'schwab.contrib.util', 'schwab.contrib.account',
+               'schwab.contrib.export', 'schwab.contrib.market_data',
+               'schwab.contrib.streaming')
 
     # Every other module in the package, and why it is not walked. A module
     # in neither list fails the suite, so a new one has to be classified.
@@ -1050,6 +1059,11 @@ class DocCoverageTest(unittest.TestCase):
                     for _, value in cls.own_members(obj):
                         if every or getattr(value, '__doc__', None):
                             ids.add(id(value))
+                            # public_api records the getter as the callable
+                            # surface of a property; the directive sees the
+                            # descriptor. They are one documented member.
+                            if isinstance(value, property):
+                                ids.add(id(value.fget))
         return ids
 
     @classmethod

@@ -11,6 +11,7 @@ focused integrations documented below.
 | `jubishop/schwab-py` | `4d6c9d1` | Its Authlib 1.8/httpx2 migration is already present in the hardened runtime |
 | [`yoshishima/TalkToChuck`](https://github.com/yoshishima/TalkToChuck) (then `yoshishima/schwab-py`) | `5ec39c5` (initial review); `44c0bd1` (focused review 2026-11-12) | Reviewed for token, streaming, order, and callback fixes; overlapping Windows/Linux fixes were already represented, and the later websocket connection-generation design was adapted to NG's single-pending-request router |
 | `neusse/Schwab_EZ_Orders` | `eca5829` (reviewed 2026-11-09) | Adapted its guided order workflow around NG's existing builders: preview-before-place, explicit live confirmation, batches, and caller-owned templates; did not copy its parallel order schema, client ownership, console UI, credential storage, or paper-trading claim |
+| [`neusse/schwab-py-extra`](https://github.com/neusse/schwab-py-extra) | `19de554` plus local-only work (reviewed 2026-11-13) | Rebuilt its diagnostics, account normalization, exports, candle conversion, streaming state, storage handoff, and examples as dependency-free NG modules; excluded client/token ownership, manual refresh, environment persistence, pandas/Rich/yfinance/Alpaca/GUI/strategy dependencies, and left both source copies intact |
 
 The NG distribution is named `schwab-py-ng`, but it deliberately installs the
 `schwab` Python package so existing applications can migrate without changing

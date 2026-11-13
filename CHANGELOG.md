@@ -33,6 +33,25 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Application utilities migrated from schwab-py-extra
+
+NG now ships dependency-free helpers for normalized account snapshots and
+position diffs, hierarchy-preserving order and transaction rows, UTF-8 CSV
+export, flattened quote and candle rows, validated multi-candle aggregation,
+bounded level-one and chart streaming state, and asynchronous handoff to
+caller-owned storage. The new ``schwab-ng-doctor`` command diagnoses mixed
+installations, token age and permissions, and optional quote connectivity
+without printing token characters, credentials, account identifiers, or
+response bodies.
+
+Runnable examples cover position snapshots and monitoring, order and
+transaction exports, dataframe-ready candles, and SQLite stream storage.
+Pandas, Rich, yfinance, Alpaca, matplotlib, GUI, and strategy dependencies from
+the experimental source remain outside NG. The reusable ideas came from both
+the published and local working copies of the maintainer's MIT-licensed
+[`schwab-py-extra`](https://github.com/neusse/schwab-py-extra); neither source
+repository or checkout was changed or removed.
+
 ### Streaming connection replacement races
 
 Concurrent logins on one ``StreamClient`` are now serialized, and queued
