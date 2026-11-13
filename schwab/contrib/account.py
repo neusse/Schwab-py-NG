@@ -29,7 +29,21 @@ def _decimal(value, field):
     return result
 
 
-def mask_account_number(account_number, visible=4):
+def account_suffix(account_number, visible=3):
+    '''Return the trailing characters used to identify an account safely.
+
+    The Schwab web interface convention is the final three account-number
+    characters. ``visible`` exists for callers with a different local
+    convention; it must be a positive integer.
+    '''
+    if account_number in (None, ''):
+        return ''
+    if isinstance(visible, bool) or not isinstance(visible, int) or visible < 1:
+        raise ValueError('visible must be a positive integer')
+    return str(account_number)[-visible:]
+
+
+def mask_account_number(account_number, visible=3):
     '''Mask an account number, leaving at most ``visible`` trailing characters.
 
     ``None`` and the empty string produce ``'Unknown'``.  The complete value is
@@ -37,12 +51,12 @@ def mask_account_number(account_number, visible=4):
     '''
     if account_number in (None, ''):
         return 'Unknown'
-    if isinstance(visible, bool) or not isinstance(visible, int) or visible < 0:
-        raise ValueError('visible must be a non-negative integer')
+    if isinstance(visible, bool) or not isinstance(visible, int) or visible < 1:
+        raise ValueError('visible must be a positive integer')
     value = str(account_number)
     shown_length = min(visible, max(0, len(value) - 1))
     shown = value[-shown_length:] if shown_length else ''
-    return '*' * max(4, len(value) - len(shown)) + shown
+    return '...' + shown
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,7 @@ class AccountIdentity:
 
     account_key: str
     display_label: str
+    account_suffix: str = ''
 
 
 @dataclass(frozen=True, order=True)
@@ -133,7 +148,8 @@ def _identity(account, info):
     if key in (None, ''):
         raise ValueError('account payload has no stable identifier')
     number = info.get('accountNumber', account.get('accountNumber'))
-    return AccountIdentity(str(key), mask_account_number(number))
+    return AccountIdentity(
+        str(key), mask_account_number(number), account_suffix(number))
 
 
 def _position(account_key, raw):
@@ -270,6 +286,7 @@ def iter_position_rows(payload, *, include_account_key=False):
             identity = position.identity
             row = {
                 'account': snapshot.identity.display_label,
+                'account_suffix': snapshot.identity.account_suffix,
                 'position_index': index,
                 'asset_type': identity.asset_type,
                 'symbol': identity.symbol,

@@ -67,9 +67,24 @@ NG also includes dependency-free [application
 utilities](https://neusse.github.io/Schwab-py-NG/utilities.html) for safe
 installation and token diagnostics, normalized account positions, stable
 order and transaction CSV rows, quote/candle conversion, bounded streaming
-state, and off-reader storage queues. Run `schwab-ng-doctor` after installation
-to detect a mixed `schwab-py`/`schwab-py-ng` environment before it corrupts an
-import.
+state, and off-reader storage queues. The installed CLI covers the common
+read-only jobs directly:
+
+```shell
+schwab-ng doctor
+schwab-ng orders --today --account 570
+schwab-ng orders --days 7 --csv orders.csv
+schwab-ng positions
+schwab-ng transactions --days 7 --json
+schwab-ng candles AAPL --every hour --days 5 --csv aapl-hourly.csv
+```
+
+Set `SCHWAB_TOKEN_PATH`, `SCHWAB_API_KEY`, and `SCHWAB_APP_SECRET` first.
+Tables identify accounts the same way the Schwab web interface does (`...570`)
+without printing account hashes or full numbers. See the [CLI workflows and
+known Trader API visibility
+limit](https://neusse.github.io/Schwab-py-NG/utilities.html#command-line-workflows)
+before treating a zero-order result as proof that no web order exists.
 
 Migrating an existing program from the original `schwab-py`? Read
 **[Compatibility Changes](COMPATIBILITY_CHANGES.md)** before installing. It

@@ -135,7 +135,12 @@ setuptools.setup(
     },
     entry_points={
         'console_scripts': [
+            'schwab-ng=schwab.cli:main',
             'schwab-ng-doctor=schwab.doctor:main',
+            'schwab-ng-orders=schwab.cli:orders_main',
+            'schwab-ng-positions=schwab.cli:positions_main',
+            'schwab-ng-transactions=schwab.cli:transactions_main',
+            'schwab-ng-candles=schwab.cli:candles_main',
         ],
     },
     keywords='finance trading equities bonds options research',

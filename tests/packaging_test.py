@@ -156,9 +156,14 @@ class SetupPyTest(unittest.TestCase):
         self.assertEqual(['dev'], sorted(self.kwargs['extras_require']))
 
     @no_duplicates
-    def test_the_doctor_console_command_is_shipped(self):
+    def test_the_ng_console_commands_are_shipped(self):
         self.assertEqual(
-            ['schwab-ng-doctor=schwab.doctor:main'],
+            ['schwab-ng=schwab.cli:main',
+             'schwab-ng-doctor=schwab.doctor:main',
+             'schwab-ng-orders=schwab.cli:orders_main',
+             'schwab-ng-positions=schwab.cli:positions_main',
+             'schwab-ng-transactions=schwab.cli:transactions_main',
+             'schwab-ng-candles=schwab.cli:candles_main'],
             self.kwargs['entry_points']['console_scripts'])
 
     @no_duplicates
@@ -915,7 +920,7 @@ class DocCoverageTest(unittest.TestCase):
                'schwab.orders.generic', 'schwab.orders.common',
                'schwab.orders.easy', 'schwab.orders.equities',
                'schwab.orders.options',
-               'schwab.utils', 'schwab.debug', 'schwab.doctor',
+               'schwab.utils', 'schwab.debug', 'schwab.doctor', 'schwab.cli',
                'schwab.contrib.util', 'schwab.contrib.account',
                'schwab.contrib.export', 'schwab.contrib.market_data',
                'schwab.contrib.streaming')

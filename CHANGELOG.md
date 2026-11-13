@@ -33,6 +33,31 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Installed CLI workflows and expanded doctor
+
+NG now installs a ``schwab-ng`` command family for orders, positions,
+transactions, candles, and diagnostics, plus direct aliases for each data
+command. It supports account selection by the web-style last three characters,
+local-date windows including ``--today``, terminal tables, CSV, and JSON.
+Order retrieval uses the per-account endpoint so account provenance is retained
+and reports top-level order counts separately from hierarchy-preserving row
+counts. An optional comparison checks the all-linked endpoint. Candle commands
+default to a bounded five-day window instead of printing the helper's entire
+default history.
+
+The doctor now reports Python/platform/timezone details, import ownership, all
+key runtime package versions, richer token timing and writability information,
+linked-account discovery, request latency, and optional update checks. Live
+quote and account checks run when credentials are configured; ``--offline``
+keeps the diagnostic local. No token values, credentials, account hashes, or
+full account numbers are displayed.
+
+Account-facing utility rows now include ``account_suffix`` and use Schwab's
+familiar ``...570`` display convention. Documentation records a live-observed
+case where a dollar-denominated SGOV order appeared in web Order Status while
+the public order and transaction endpoints returned no matching record, so CLI
+zero-result messages explicitly name the Trader API as their source.
+
 ### Application utilities migrated from schwab-py-extra
 
 NG now ships dependency-free helpers for normalized account snapshots and

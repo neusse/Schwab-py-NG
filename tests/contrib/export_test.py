@@ -42,9 +42,10 @@ class ExportTest(unittest.TestCase):
             [row['record_type'] for row in rows])
         self.assertEqual('0.0', rows[3]['order_path'])
         self.assertEqual(10, rows[3]['parent_order_id'])
-        self.assertEqual('****5678', rows[3]['account'])
+        self.assertEqual('...678', rows[3]['account'])
+        self.assertEqual('678', rows[3]['account_suffix'])
         self.assertEqual(0, rows[2]['leg_index'])
-        self.assertEqual('****5678', rows[0]['account'])
+        self.assertEqual('...678', rows[0]['account'])
 
     @no_duplicates
     def test_transaction_rows_keep_variable_items_as_rows(self):
@@ -61,6 +62,7 @@ class ExportTest(unittest.TestCase):
                          [row['record_type'] for row in rows])
         self.assertEqual([0, 1], [rows[1]['item_index'], rows[2]['item_index']])
         self.assertEqual(42, rows[2]['transaction_id'])
+        self.assertEqual('678', rows[2]['account_suffix'])
 
     @no_duplicates
     def test_write_csv_unions_columns_in_first_seen_order(self):

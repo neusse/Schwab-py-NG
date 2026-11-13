@@ -6,7 +6,7 @@ import os
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
 
-from .account import mask_account_number
+from .account import account_suffix, mask_account_number
 
 
 def _sequence(value, field):
@@ -29,11 +29,15 @@ def _order_rows(order, path, parent_order_id, inherited_account='Unknown'):
     account = (mask_account_number(order.get('accountNumber'))
                if order.get('accountNumber') not in (None, '')
                else inherited_account)
+    suffix = account_suffix(order.get('accountNumber'))
+    if not suffix and account != 'Unknown':
+        suffix = account.rsplit('.', 1)[-1]
     base = {
         'order_path': path,
         'order_id': order_id,
         'parent_order_id': parent_order_id,
         'account': account,
+        'account_suffix': suffix,
     }
     yield {
         **base,
@@ -147,10 +151,12 @@ def iter_transaction_rows(transactions):
         transaction_id = transaction.get('activityId',
                                          transaction.get('transactionId'))
         account = mask_account_number(transaction.get('accountNumber'))
+        suffix = account_suffix(transaction.get('accountNumber'))
         base = {
             'transaction_index': transaction_index,
             'transaction_id': transaction_id,
             'account': account,
+            'account_suffix': suffix,
         }
         yield {
             **base,
