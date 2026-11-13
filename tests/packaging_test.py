@@ -163,7 +163,8 @@ class SetupPyTest(unittest.TestCase):
              'schwab-ng-orders=schwab.cli:orders_main',
              'schwab-ng-positions=schwab.cli:positions_main',
              'schwab-ng-transactions=schwab.cli:transactions_main',
-             'schwab-ng-candles=schwab.cli:candles_main'],
+             'schwab-ng-candles=schwab.cli:candles_main',
+             'schwab-fetch-new-token=schwab.cli:fetch_new_token_main'],
             self.kwargs['entry_points']['console_scripts'])
 
     @no_duplicates

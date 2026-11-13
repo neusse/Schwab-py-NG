@@ -72,6 +72,7 @@ read-only jobs directly:
 
 ```shell
 schwab-ng doctor
+schwab-fetch-new-token
 schwab-ng orders --today --account 570
 schwab-ng orders --days 7 --csv orders.csv
 schwab-ng positions
@@ -80,6 +81,10 @@ schwab-ng candles AAPL --every hour --days 5 --csv aapl-hourly.csv
 ```
 
 Set `SCHWAB_TOKEN_PATH`, `SCHWAB_API_KEY`, and `SCHWAB_APP_SECRET` first.
+`schwab-fetch-new-token` additionally uses `SCHWAB_CALLBACK_URL` and performs a
+complete manual/copy-paste OAuth authorization when the refresh token has fully
+expired. It is not a refresh. An existing token is left untouched unless the
+new authorization succeeds; use `--yes` to skip its replacement confirmation.
 Tables identify accounts the same way the Schwab web interface does (`...570`)
 without printing account hashes or full numbers. See the [CLI workflows and
 known Trader API visibility

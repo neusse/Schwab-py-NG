@@ -69,6 +69,12 @@ default when its three environment values are present; use
 commands can refresh and rewrite the configured token file through the normal
 client refresh path, but do not otherwise manage credentials or resources.
 
+``schwab-fetch-new-token`` is the explicit exception: it is an operator command
+for replacing a fully expired token through a complete manual OAuth
+authorization. Running it is an intentional request to manage the configured
+token file. It confirms an existing file unless ``--yes`` is used and does not
+modify that file unless the new authorization succeeds.
+
 The utilities deliberately do not reproduce several behaviors from the old
 ``schwab-py-extra`` experiments: they do not create or cache clients, persist
 environment variables, manually refresh or delete token files, reveal token

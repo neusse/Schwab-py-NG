@@ -141,6 +141,7 @@ setuptools.setup(
             'schwab-ng-positions=schwab.cli:positions_main',
             'schwab-ng-transactions=schwab.cli:transactions_main',
             'schwab-ng-candles=schwab.cli:candles_main',
+            'schwab-fetch-new-token=schwab.cli:fetch_new_token_main',
         ],
     },
     keywords='finance trading equities bonds options research',
