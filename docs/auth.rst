@@ -158,6 +158,37 @@ flow.
 
 .. autofunction:: schwab.auth.client_from_manual_flow
 
++++++++++++++++++++++++++++++++++++++++++
+Full OAuth token replacement from the CLI
++++++++++++++++++++++++++++++++++++++++++
+
+Once Schwab's refresh token has fully expired, refreshing the short-lived
+access token cannot recover it. Run the installed operator command to perform a
+new authorization:
+
+.. code-block:: shell
+
+  schwab-fetch-new-token
+
+The command reads ``SCHWAB_API_KEY``, ``SCHWAB_APP_SECRET``,
+``SCHWAB_CALLBACK_URL``, and ``SCHWAB_TOKEN_PATH`` (lower-case spellings are
+also accepted). It deliberately uses the manual flow above: open the printed
+Schwab URL, sign in and complete MFA on Schwab's site, approve the application,
+then paste the entire redirected callback URL into the terminal. Treat that URL
+as a short-lived secret.
+
+If a token file already exists, the command asks before replacing it; ``--yes``
+skips that confirmation. It does not delete the old file first. Cancellation,
+a failed sign-in, a rejected exchange, or an invalid callback therefore leaves
+the existing token untouched. Only a successful exchange reaches NG's atomic
+token writer and replaces the file. ``--token-path`` and ``--callback-url`` can
+override their corresponding environment values; the API key and app secret
+remain environment-only so they do not enter shell history or process lists.
+
+On Windows, Python packaging installs this command as
+``schwab-fetch-new-token.exe``. ``schwab-ng fetch-new-token`` is an equivalent
+entry point on every supported platform.
+
 Once you have a token written on disk, you can reuse it without going through
 the login flow again.
 

@@ -33,6 +33,21 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Explicit full-OAuth token replacement command
+
+The installed ``schwab-fetch-new-token`` command (an ``.exe`` launcher on
+Windows) and equivalent ``schwab-ng fetch-new-token`` subcommand now replace a
+fully expired refresh token through the manual/copy-paste OAuth authorization
+flow. This is a complete new authorization, not a token refresh. It reads the
+configured callback URL and token path alongside the existing API environment
+values, confirms before replacing an existing token unless ``--yes`` is used,
+and never accepts the app secret on the command line.
+
+Unlike the old ``schwab-py-extra`` experiment, the command does not delete the
+current token before starting OAuth. A canceled or failed authorization leaves
+the existing file untouched; the normal atomic writer replaces it only after a
+successful authorization-code exchange.
+
 ### Installed CLI workflows and expanded doctor
 
 NG now installs a ``schwab-ng`` command family for orders, positions,

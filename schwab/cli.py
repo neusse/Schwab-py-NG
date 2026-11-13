@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from decimal import Decimal
+from pathlib import Path
 
 import httpx2
 
@@ -34,6 +35,23 @@ def _client():
     return auth.client_from_token_file(
         values['SCHWAB_TOKEN_PATH'], values['SCHWAB_API_KEY'],
         values['SCHWAB_APP_SECRET'])
+
+
+def _oauth_settings(args):
+    values = {
+        'SCHWAB_TOKEN_PATH': (args.token_path
+                              or _environment('SCHWAB_TOKEN_PATH')),
+        'SCHWAB_CALLBACK_URL': (args.callback_url
+                                or _environment('SCHWAB_CALLBACK_URL')),
+        'SCHWAB_API_KEY': _environment('SCHWAB_API_KEY'),
+        'SCHWAB_APP_SECRET': _environment('SCHWAB_APP_SECRET'),
+    }
+    missing = [name for name, value in values.items() if not value]
+    if missing:
+        raise RuntimeError(
+            'missing {}; set the Schwab environment variables first'.format(
+                ', '.join(missing)))
+    return values
 
 
 def _accounts(client, selector=None):
@@ -281,6 +299,48 @@ def run_candles(args):
         '{} candles; source: Schwab Market Data API'.format(len(rows)))
 
 
+def run_fetch_new_token(args):
+    '''Complete full OAuth and atomically replace the configured token file.'''
+    settings = _oauth_settings(args)
+    token_path = Path(settings['SCHWAB_TOKEN_PATH']).expanduser()
+    if token_path.exists() and token_path.is_dir():
+        raise RuntimeError('token path names a directory: {}'.format(
+            token_path))
+    if not token_path.parent.is_dir():
+        raise RuntimeError('token directory does not exist: {}'.format(
+            token_path.parent))
+
+    if token_path.exists() and not args.yes:
+        print('A token file already exists at: {}'.format(token_path))
+        print('It will remain unchanged unless the full OAuth flow succeeds.')
+        answer = input('Replace it with a newly authorized token? [y/N] ')
+        if answer.strip().lower() not in ('y', 'yes'):
+            print('Token replacement canceled; the existing file was not changed.')
+            return 1
+
+    print('Starting full Schwab OAuth authorization (not a token refresh).')
+    print('The existing token will be replaced only after a successful exchange.')
+    auth.client_from_manual_flow(
+        settings['SCHWAB_API_KEY'], settings['SCHWAB_APP_SECRET'],
+        settings['SCHWAB_CALLBACK_URL'], str(token_path))
+    print('New Schwab authorization token saved to: {}'.format(token_path))
+    return 0
+
+
+def _configure_fetch_parser(parser):
+    parser.add_argument(
+        '--token-path',
+        help='override SCHWAB_TOKEN_PATH (API credentials stay in the environment)')
+    parser.add_argument(
+        '--callback-url',
+        help='override SCHWAB_CALLBACK_URL (must match the Schwab app)')
+    parser.add_argument(
+        '--yes', action='store_true',
+        help='replace an existing token without the confirmation prompt')
+    parser.set_defaults(handler=run_fetch_new_token)
+    return parser
+
+
 def build_parser(prog='schwab-ng'):
     '''Build the top-level command parser.'''
     parser = argparse.ArgumentParser(
@@ -290,6 +350,10 @@ def build_parser(prog='schwab-ng'):
     doctor = commands.add_parser('doctor', help='diagnose installation and access')
     configure_doctor_parser(doctor)
     doctor.set_defaults(handler=run_doctor)
+
+    _configure_fetch_parser(commands.add_parser(
+        'fetch-new-token',
+        help='replace an expired token through full manual OAuth'))
 
     orders = commands.add_parser('orders', help='list or export orders')
     _account_argument(orders)
@@ -330,9 +394,7 @@ def build_parser(prog='schwab-ng'):
     return parser
 
 
-def main(argv=None):
-    '''Run the ``schwab-ng`` command family and return an exit status.'''
-    parser = build_parser()
+def _execute(parser, argv):
     try:
         args = parser.parse_args(argv)
         result = args.handler(args)
@@ -341,12 +403,17 @@ def main(argv=None):
         response = getattr(exc, 'response', None)
         status = getattr(response, 'status_code', None)
         detail = 'HTTP {}'.format(status) if status is not None else type(exc).__name__
-        print('schwab-ng: Trader API request failed ({})'.format(detail),
+        print('{}: Schwab request failed ({})'.format(parser.prog, detail),
               file=sys.stderr)
         return 1
-    except (KeyError, RuntimeError, ValueError) as exc:
-        print('schwab-ng: error: {}'.format(exc), file=sys.stderr)
+    except (EOFError, KeyError, RuntimeError, ValueError) as exc:
+        print('{}: error: {}'.format(parser.prog, exc), file=sys.stderr)
         return 2
+
+
+def main(argv=None):
+    '''Run the ``schwab-ng`` command family and return an exit status.'''
+    return _execute(build_parser(), argv)
 
 
 def _alias(command, argv=None):
@@ -371,3 +438,12 @@ def transactions_main(argv=None):
 def candles_main(argv=None):
     '''Run the standalone ``schwab-ng-candles`` alias.'''
     return _alias('candles', argv)
+
+
+def fetch_new_token_main(argv=None):
+    '''Run the standalone ``schwab-fetch-new-token`` command.'''
+    parser = _configure_fetch_parser(argparse.ArgumentParser(
+        prog='schwab-fetch-new-token',
+        description=('Replace an expired token through a complete manual '
+                     'Schwab OAuth authorization.')))
+    return _execute(parser, argv)

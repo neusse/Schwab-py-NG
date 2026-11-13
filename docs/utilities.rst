@@ -27,6 +27,7 @@ are not accepted as command-line arguments.
 .. code-block:: shell
 
   schwab-ng doctor
+  schwab-fetch-new-token
   schwab-ng orders --today
   schwab-ng orders --today --account 570 --csv orders.csv
   schwab-ng positions --account 570
@@ -50,6 +51,17 @@ Date-aware commands accept ``--today``, ``--days``, or inclusive
 ``schwab-ng-candles`` commands are aliases for the corresponding subcommands.
 Candle requests default to the last five days so an interactive command does
 not unexpectedly print decades of daily or weekly history.
+
+When the seven-day refresh token has fully expired, ``schwab-fetch-new-token``
+starts a complete manual/copy-paste OAuth authorization and replaces the file
+at ``SCHWAB_TOKEN_PATH``. It also exists as ``schwab-ng fetch-new-token``. This
+is not an access-token or refresh-token refresh: the operator signs in to
+Schwab, completes MFA, approves the application, and pastes the entire callback
+URL. The command additionally requires ``SCHWAB_CALLBACK_URL``. Existing
+tokens require confirmation unless ``--yes`` is supplied, and remain untouched
+when authorization is canceled or fails; NG's atomic token writer replaces the
+file only after a successful exchange. API keys and secrets cannot be supplied
+on the command line.
 
 
 Trader API visibility is not web Order Status parity
@@ -115,10 +127,12 @@ sensitive exception text is suppressed. ``--json`` is suitable for automation.
 .. autofunction:: schwab.cli.run_positions
 .. autofunction:: schwab.cli.run_transactions
 .. autofunction:: schwab.cli.run_candles
+.. autofunction:: schwab.cli.run_fetch_new_token
 .. autofunction:: schwab.cli.orders_main
 .. autofunction:: schwab.cli.positions_main
 .. autofunction:: schwab.cli.transactions_main
 .. autofunction:: schwab.cli.candles_main
+.. autofunction:: schwab.cli.fetch_new_token_main
 
 
 Accounts and positions

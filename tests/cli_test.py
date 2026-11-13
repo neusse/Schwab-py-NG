@@ -74,6 +74,7 @@ def args(**overrides):
         'from_date': None, 'to_date': None, 'csv': None, 'json': False,
         'status': None, 'max_results': None, 'compare_endpoints': False,
         'symbol': None, 'every': 'hour',
+        'token_path': None, 'callback_url': None, 'yes': False,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -193,9 +194,75 @@ class CliTest(unittest.TestCase):
         self.assertIn('zero transactions', output.getvalue())
 
     @no_duplicates
+    def test_fetch_new_token_requires_all_oauth_settings(self):
+        with patch('schwab.cli._environment', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'SCHWAB_TOKEN_PATH'):
+                cli.run_fetch_new_token(args())
+
+    @no_duplicates
+    def test_fetch_new_token_cancel_preserves_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            path.write_text('existing token', encoding='utf-8')
+            environment = {
+                'SCHWAB_TOKEN_PATH': str(path),
+                'SCHWAB_CALLBACK_URL': 'https://127.0.0.1:8182',
+                'SCHWAB_API_KEY': 'key',
+                'SCHWAB_APP_SECRET': 'secret',
+            }
+            with patch('schwab.cli._environment', side_effect=environment.get), \
+                 patch('builtins.input', return_value='no'), \
+                 patch('schwab.cli.auth.client_from_manual_flow') as flow, \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                result = cli.run_fetch_new_token(args())
+            self.assertEqual(1, result)
+            flow.assert_not_called()
+            self.assertEqual(
+                'existing token', path.read_text(encoding='utf-8'))
+            self.assertIn('was not changed', output.getvalue())
+
+    @no_duplicates
+    def test_fetch_new_token_runs_full_manual_oauth_and_can_override_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'token.json'
+            path.write_text('existing token', encoding='utf-8')
+            environment = {
+                'SCHWAB_API_KEY': 'key',
+                'SCHWAB_APP_SECRET': 'secret',
+            }
+            with patch('schwab.cli._environment', side_effect=environment.get), \
+                 patch('schwab.cli.auth.client_from_manual_flow') as flow, \
+                 patch('builtins.input') as prompt, \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                result = cli.run_fetch_new_token(args(
+                    token_path=str(path),
+                    callback_url='https://127.0.0.1:8182', yes=True))
+            self.assertEqual(0, result)
+            prompt.assert_not_called()
+            flow.assert_called_once_with(
+                'key', 'secret', 'https://127.0.0.1:8182', str(path))
+            self.assertIn('full Schwab OAuth', output.getvalue())
+            self.assertIn('not a token refresh', output.getvalue())
+
+    @no_duplicates
+    def test_fetch_new_token_refuses_a_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                'SCHWAB_TOKEN_PATH': directory,
+                'SCHWAB_CALLBACK_URL': 'https://127.0.0.1:8182',
+                'SCHWAB_API_KEY': 'key',
+                'SCHWAB_APP_SECRET': 'secret',
+            }
+            with patch('schwab.cli._environment', side_effect=environment.get):
+                with self.assertRaisesRegex(RuntimeError, 'names a directory'):
+                    cli.run_fetch_new_token(args(yes=True))
+
+    @no_duplicates
     def test_parser_main_error_doctor_and_aliases(self):
         parser = cli.build_parser('test')
         self.assertEqual('orders', parser.parse_args(['orders']).command)
+        self.assertEqual('fetch-new-token', parser.parse_args(
+            ['fetch-new-token', '--yes']).command)
         with patch('schwab.cli.run_doctor', return_value=7):
             # The handler reference is captured while the parser is built.
             pass
@@ -218,3 +285,6 @@ class CliTest(unittest.TestCase):
             self.assertEqual(0, cli.transactions_main([]))
             self.assertEqual(0, cli.candles_main(['AAPL']))
         self.assertEqual(4, main.call_count)
+        with patch('schwab.cli.run_fetch_new_token', return_value=0) as fetch:
+            self.assertEqual(0, cli.fetch_new_token_main(['--yes']))
+        self.assertTrue(fetch.call_args.args[0].yes)
