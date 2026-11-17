@@ -167,6 +167,7 @@ class SyncRevocationTest(unittest.TestCase):
         self.assertTrue(error.retryable)
         self.assertFalse(error.server_revoked)
         self.assertIsNone(error.__cause__)
+        self.assertIsNone(error.__context__)
         self.assertEqual([], stored)
         self.assertNotIn(REFRESH_TOKEN, str(error))
         self.assertNotIn(REFRESH_TOKEN, repr(error))
@@ -189,6 +190,7 @@ class SyncRevocationTest(unittest.TestCase):
         self.assertTrue(error.retryable)
         self.assertTrue(error.server_revoked)
         self.assertIsNone(error.__cause__)
+        self.assertIsNone(error.__context__)
         self.assertEqual(REFRESH_TOKEN, client.token_metadata.token['refresh_token'])
         self.assertFalse(client.token_metadata.revoked)
         self.assertNotIn(REFRESH_TOKEN, str(error))
@@ -300,6 +302,7 @@ class AsyncRevocationTest(unittest.TestCase):
             self.assertTrue(error.retryable)
             self.assertFalse(error.endpoint_answered)
             self.assertIsNone(error.__cause__)
+            self.assertIsNone(error.__context__)
             self.assertNotIn(REFRESH_TOKEN, repr(error))
             await client.close_async_session()
 

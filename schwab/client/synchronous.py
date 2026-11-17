@@ -54,11 +54,14 @@ class Client(BaseClient):
         request = self._token_revocation_request()
         if request is None:
             return None
+        transport_error = None
         try:
             response = self.session.request(
                     'POST', **request)
         except httpx2.HTTPError:
-            raise self._token_revocation_transport_error() from None
+            transport_error = self._token_revocation_transport_error()
+        if transport_error is not None:
+            raise transport_error
         self._persist_token_revocation(response)
 
     def _get_request(self, path, params):

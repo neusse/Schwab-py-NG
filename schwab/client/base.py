@@ -115,17 +115,20 @@ class BaseClient(EnumEnforcer):
                     endpoint_answered=True,
                     retryable=(status == 429 or 500 <= status < 600),
                     server_revoked=False)
+        persistence_error = None
         try:
             self.token_metadata._mark_revoked()
         except Exception:
-            raise TokenRevocationError(
+            persistence_error = TokenRevocationError(
                     'Schwab accepted the refresh-token revocation, but the '
                     'local revoked marker could not be persisted. Do not '
                     'reuse this client; retrying the revocation is safe.',
                     status_code=httpx2.codes.OK,
                     endpoint_answered=True,
                     retryable=True,
-                    server_revoked=True) from None
+                    server_revoked=True)
+        if persistence_error is not None:
+            raise persistence_error
 
     @staticmethod
     def _token_revocation_transport_error():
