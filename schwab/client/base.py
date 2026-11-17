@@ -20,7 +20,8 @@ import warnings
 
 from schwab.orders.generic import OrderBuilder
 
-from ..utils import (EnumEnforcer, TokenRefreshError, _expiry_authlib_acts_on,
+from ..utils import (EnumEnforcer, TokenRefreshError, TokenRevocationError,
+                     _expiry_authlib_acts_on,
                      _format_iso_instant, _is_instance, _qualified_type_name,
                      _refusal_text, _token_endpoint_answer)
 from .. import _redact
@@ -71,6 +72,73 @@ class BaseClient(EnumEnforcer):
         self._rate_limit_max_retries = 0
         self._rate_limit_backoff_factor = 1.0
         self._rate_limit_max_delay = 60.0
+
+    _TOKEN_REVOKE_URL = 'https://api.schwabapi.com/v1/oauth/revoke'
+
+    def _token_revocation_request(self):
+        if self.token_metadata is None:
+            raise TokenRevocationError(
+                    'This client was built without token metadata, so its '
+                    'refresh token cannot be revoked and persisted safely.',
+                    endpoint_answered=False,
+                    retryable=False,
+                    server_revoked=False)
+        if self.token_metadata.revoked:
+            return None
+        token = self.token_metadata.token
+        refresh_token = token.get('refresh_token')
+        if not _is_instance(refresh_token, str) or not refresh_token:
+            raise TokenRevocationError(
+                    'The stored token has no usable refresh token to revoke. '
+                    'Complete the full authorization flow to create one.',
+                    endpoint_answered=False,
+                    retryable=False,
+                    server_revoked=False)
+        return {
+            'url': self._TOKEN_REVOKE_URL,
+            'data': {
+                'token': refresh_token,
+                'token_type_hint': 'refresh_token',
+            },
+            'auth': (self.session.client_id, self.session.client_secret),
+            'withhold_token': True,
+        }
+
+    def _persist_token_revocation(self, response):
+        if response.status_code != httpx2.codes.OK:
+            status = response.status_code
+            raise TokenRevocationError(
+                    'Schwab did not accept the refresh-token revocation '
+                    'request (HTTP {}). The local token remains active.'
+                    .format(status),
+                    status_code=status,
+                    endpoint_answered=True,
+                    retryable=(status == 429 or 500 <= status < 600),
+                    server_revoked=False)
+        persistence_error = None
+        try:
+            self.token_metadata._mark_revoked()
+        except Exception:
+            persistence_error = TokenRevocationError(
+                    'Schwab accepted the refresh-token revocation, but the '
+                    'local revoked marker could not be persisted. Do not '
+                    'reuse this client; retrying the revocation is safe.',
+                    status_code=httpx2.codes.OK,
+                    endpoint_answered=True,
+                    retryable=True,
+                    server_revoked=True)
+        if persistence_error is not None:
+            raise persistence_error
+
+    @staticmethod
+    def _token_revocation_transport_error():
+        return TokenRevocationError(
+                'The refresh-token revocation endpoint could not be reached. '
+                'The local token remains active and may still be active at '
+                'Schwab.',
+                endpoint_answered=False,
+                retryable=True,
+                server_revoked=False)
 
     # XXX: This class's tests perform monkey patching to inject synthetic values
     # of utcnow(). To avoid being confused by this, these are the values

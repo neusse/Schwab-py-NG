@@ -300,6 +300,15 @@ Token Age
 .. automethod:: schwab.client.Client.token_age
 
 
++++++++++++++++++++++++++
+Refresh-token revocation
++++++++++++++++++++++++++
+
+.. automethod:: schwab.client.Client.revoke
+
+.. automethod:: schwab.client.AsyncClient.revoke
+
+
 ++++++++++++
 Account Info
 ++++++++++++

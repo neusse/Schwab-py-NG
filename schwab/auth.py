@@ -26,7 +26,7 @@ import webbrowser
 
 from schwab import _redact
 from schwab.client import AsyncClient, Client
-from schwab.utils import (LoginExchangeError, SchwabError,
+from schwab.utils import (LoginExchangeError, SchwabError, TokenRevokedError,
         _expiry_authlib_acts_on, _is_instance, _refusal_text,
         _token_endpoint_answer, _venue_text)
 from schwab.debug import register_redactions
@@ -533,7 +533,8 @@ class TokenMetadata:
     Provides the functionality required to maintain and update our view of the
     token's metadata.
     '''
-    def __init__(self, token, creation_timestamp, unwrapped_token_write_func):
+    def __init__(self, token, creation_timestamp, unwrapped_token_write_func,
+                 revoked=False):
         '''
         :param token: The token to wrap in metadata
         :param creation_timestamp: Timestamp at which this token was initially 
@@ -556,6 +557,7 @@ class TokenMetadata:
         # is called.
         _register_token(token)
         self.token = token
+        self.revoked = revoked
 
     @classmethod
     def from_loaded_token(cls, token, unwrapped_token_write_func):
@@ -600,6 +602,16 @@ class TokenMetadata:
                     'a float can hold, so its age cannot be known. If it came '
                     'from a token file, delete the file and create a new '
                     'one.')
+        revoked = token.get('revoked', False)
+        if not issubclass(type(revoked), bool):
+            raise ValueError(
+                    'The token\'s revoked marker is not true or false, so its '
+                    'state cannot be trusted. If it came from a token file, '
+                    'delete the file and create a new one.')
+        if revoked:
+            return TokenMetadata(
+                    None, creation_timestamp,
+                    unwrapped_token_write_func, revoked=True)
         if 'token' not in token:
             raise ValueError(
                     'The token has no "token" entry, so it is not a token '
@@ -643,6 +655,14 @@ class TokenMetadata:
             'token': token,
         }
 
+    def _mark_revoked(self):
+        self.unwrapped_token_write_func({
+            'creation_timestamp': self.creation_timestamp,
+            'revoked': True,
+        })
+        self.token = None
+        self.revoked = True
+
 
 def token_file_age(token_path):
     '''Returns the number of seconds since the token in ``token_path`` was
@@ -677,6 +697,11 @@ def token_file_age(token_path):
     # would bury the line a client writes when it actually loads the token.
     metadata = TokenMetadata.from_loaded_token(
             __token_loader(token_path, logging.DEBUG)(), None)
+    if metadata.revoked:
+        raise TokenRevokedError(
+                'The stored refresh token was revoked, so it has no active '
+                'token age. Complete the full authorization flow to create '
+                'a new token.')
     # The check a client applies to the token before building a session on
     # it. Without it a monitor reported a healthy age for a file every client
     # build refused. It works on a copy, so the file's token is untouched.
@@ -1306,6 +1331,10 @@ def client_from_access_functions(api_key, app_secret, token_read_func,
 
     # Extract metadata and unpack the token, if necessary
     metadata = TokenMetadata.from_loaded_token(token, token_write_func)
+    if metadata.revoked:
+        raise TokenRevokedError(
+                'The stored refresh token was revoked. Complete the full '
+                'authorization flow to create a new token.')
     token = _stored_token_for_session(metadata.token)
 
     # Don't emit token details in debug logs. The walk recurses once per level,
@@ -1640,12 +1669,17 @@ def easy_client(api_key, app_secret, callback_url, token_path, asyncio=False,
     c = None
 
     if os.path.isfile(token_path):
-        c = client_from_token_file(token_path, api_key, app_secret,
-                                   asyncio=asyncio,
-                                   enforce_enums=enforce_enums)
-        logger.info('Loaded token from file \'%s\'', token_path)
+        try:
+            c = client_from_token_file(token_path, api_key, app_secret,
+                                       asyncio=asyncio,
+                                       enforce_enums=enforce_enums)
+        except TokenRevokedError:
+            logger.info('Stored token was revoked; creating a new one')
+        else:
+            logger.info('Loaded token from file \'%s\'', token_path)
 
-        if max_token_age > 0 and c.token_age() >= max_token_age:
+        if (c is not None and max_token_age > 0
+                and c.token_age() >= max_token_age):
             logger.info('token too old, proactively creating a new one')
             c = None
 

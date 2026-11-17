@@ -358,6 +358,88 @@ cover.
 
 
 ++++++++++++++++++++++++++
+Revoking a Refresh Token
+++++++++++++++++++++++++++
+
+Deleting a token file only forgets the credential locally. To retire a token
+at Schwab as well, call :meth:`~schwab.client.Client.revoke` on a client made
+by one of the authentication functions:
+
+.. code-block:: python
+
+  from schwab.auth import client_from_token_file
+  from schwab.utils import TokenRevocationError
+
+  client = client_from_token_file(
+          '/path/to/token.json', API_KEY, APP_SECRET)
+
+  try:
+      client.revoke()
+  except TokenRevocationError as exc:
+      if exc.server_revoked:
+          # Schwab accepted it, but the local tombstone could not be written.
+          # Do not keep using this client. Retrying is safe.
+          alert_operator()
+      elif exc.retryable:
+          retry_later()
+      else:
+          alert_operator()
+
+For an asyncio client, use ``await client.revoke()``. A successful call returns
+``None``. It atomically replaces the token file with a secretless marker
+containing only its creation time and ``"revoked": true``. It does not return
+the raw HTTP response: that response retains its request, whose form body
+contains the refresh token and whose Basic authorization contains the app
+secret.
+
+The operation is intentionally idempotent. RFC 7009 requires HTTP 200 both for
+a newly revoked token and for an invalid or already-revoked token, and a second
+call on the same client is a local no-op. HTTP 429 and server errors are marked
+``retryable``; client errors are not. A transport failure is also retryable.
+In every failure before HTTP 200, the active local token is left untouched.
+
+If Schwab returns 200 but the atomic local write fails,
+``TokenRevocationError.server_revoked`` is true: the server action succeeded
+even though the local state did not. Retrying is safe and gives the writer
+another chance. Exceptions never carry the raw request or response and do not
+chain a transport or writer exception, because either can retain or repeat the
+credential.
+
+Loading a revoked marker with :func:`~schwab.auth.client_from_token_file` or
+:func:`~schwab.auth.client_from_access_functions` raises
+:class:`~schwab.utils.TokenRevokedError`. :func:`~schwab.auth.easy_client`
+instead starts the full authorization flow and overwrites the marker only after
+that flow succeeds. Markers written by the upstream prototype, which kept the
+old token beside ``"revoked": true``, are also refused; new markers retain no
+token secrets.
+
+Revocation is irreversible and is not a refresh operation. RFC 7009 says an
+authorization server *should* invalidate access tokens from the same grant
+when it supports that operation, not that every server must. Do not document
+immediate cascading access-token invalidation as Schwab behavior until it has
+been observed with a controlled credential.
+
+Before a release which changes this path, verify it only with a disposable or
+otherwise controlled token you are prepared to replace:
+
+1. Build a client from that token and call ``revoke()`` once.
+2. Confirm the token store now contains ``creation_timestamp`` and
+   ``revoked: true``, with no ``token``, access token, refresh token or ID token.
+3. Confirm direct loading raises ``TokenRevokedError``.
+4. Confirm ``easy_client`` begins a new full authorization rather than using
+   the marker.
+5. Record whether Schwab invalidated an already-issued access token separately;
+   do not infer that result from the successful refresh-token revocation.
+
+Never paste the controlled token, Basic authorization header, request body, or
+raw request/response objects into the verification record.
+
+.. autoclass:: schwab.utils.TokenRevocationError
+
+.. autoclass:: schwab.utils.TokenRevokedError
+
+
+++++++++++++++++++++++++++
 A Note on Keys and Secrets
 ++++++++++++++++++++++++++
 

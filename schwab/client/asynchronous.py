@@ -3,6 +3,7 @@ from ..debug import register_redactions_from_response
 from ..utils import LazyLog, TokenRefreshError
 
 import asyncio
+import httpx2
 import json
 
 
@@ -37,6 +38,24 @@ class AsyncClient(BaseClient):
         :meth:`Client.close_session`; the client cannot be used after it.
         '''
         await self.session.aclose()
+
+    async def revoke(self):
+        '''The asynchronous form of :meth:`Client.revoke`.
+
+        Await it. It returns ``None`` after Schwab accepts the revocation and
+        the secretless revoked marker has been persisted.
+        '''
+        request = self._token_revocation_request()
+        if request is None:
+            return None
+        transport_error = None
+        try:
+            response = await self.session.request('POST', **request)
+        except httpx2.HTTPError:
+            transport_error = self._token_revocation_transport_error()
+        if transport_error is not None:
+            raise transport_error
+        self._persist_token_revocation(response)
 
     async def _get_request(self, path, params):
         dest = 'https://api.schwabapi.com' + path
