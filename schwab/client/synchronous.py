@@ -2,6 +2,7 @@ from .base import BaseClient
 from ..utils import LazyLog, TokenRefreshError
 from ..debug import register_redactions_from_response
 
+import httpx2
 import json
 import time
 
@@ -28,6 +29,37 @@ class Client(BaseClient):
         asyncio client.
         '''
         self.session.close()
+
+    def revoke(self):
+        '''Permanently revoke this client's refresh token at Schwab.
+
+        On HTTP 200, replaces the stored token with a secretless revoked
+        marker and returns ``None``. Calling this method again on the same
+        client is a local no-op. A client loaded directly from the marker
+        raises :class:`~schwab.utils.TokenRevokedError`; ``easy_client`` starts
+        a full authorization flow instead.
+
+        This is irreversible. Use it when retiring or losing a credential,
+        not as a way to refresh an access token. RFC 7009 says an authorization
+        server should also invalidate access tokens from the same grant when
+        it supports that operation; it does not make that cascade universal.
+
+        :raises TokenRevocationError: The request could not be sent, Schwab
+            returned a status other than 200, the client has no usable refresh
+            token or persistent metadata, or the revoked marker could not be
+            stored. Inspect ``endpoint_answered``, ``status_code``,
+            ``retryable`` and ``server_revoked``; the exception deliberately
+            carries no credential-bearing request or response.
+        '''
+        request = self._token_revocation_request()
+        if request is None:
+            return None
+        try:
+            response = self.session.request(
+                    'POST', **request)
+        except httpx2.HTTPError:
+            raise self._token_revocation_transport_error() from None
+        self._persist_token_revocation(response)
 
     def _get_request(self, path, params):
         dest = 'https://api.schwabapi.com' + path

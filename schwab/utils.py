@@ -889,6 +889,37 @@ class TokenRefreshError(SchwabError):
         self.endpoint_answered = endpoint_answered
 
 
+class TokenRevokedError(SchwabError):
+    '''Raised when persistent token metadata says the token was revoked.
+
+    No credential is retained in a revoked tombstone. Create a new token with
+    the full authorization flow instead of retrying the stored one.
+    '''
+
+
+class TokenRevocationError(SchwabError):
+    '''A refresh token could not be safely revoked.
+
+    ``endpoint_answered`` and ``status_code`` say whether Schwab answered and
+    with which status. ``retryable`` is true for a transport failure, rate
+    limit, or server error. ``server_revoked`` is true only when Schwab
+    accepted the revocation but its local tombstone could not be persisted.
+
+    The exception deliberately carries no request or response. A revocation
+    request contains the refresh token in its form body and the application
+    secret in Basic authentication, so attaching either object would turn an
+    ordinary diagnostic into a credential container.
+    '''
+
+    def __init__(self, message, *, status_code=None, endpoint_answered=False,
+                 retryable=False, server_revoked=False):
+        super().__init__(message)
+        self.status_code = status_code
+        self.endpoint_answered = endpoint_answered
+        self.retryable = retryable
+        self.server_revoked = server_revoked
+
+
 class LoginExchangeError(SchwabError, OAuthError):
     '''
     Raised when a login cannot exchange its authorization code for a token.

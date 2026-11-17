@@ -995,6 +995,8 @@ class UtilsTest(unittest.TestCase):
             'UnusableAccountNumbersError': ('m',),
             'UnusableOrderActivityError': ('m',),
             'TokenRefreshError': ('m',),
+            'TokenRevokedError': ('m',),
+            'TokenRevocationError': ('m',),
             'LoginExchangeError': ('invalid_grant', 'code already used'),
             'RedirectTimeoutError': ('m',),
             'RedirectServerExitedError': ('m',),
