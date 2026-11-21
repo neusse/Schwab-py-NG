@@ -137,6 +137,13 @@ The suite mocks the network. It proves this library builds the request it
 intended to build. It says nothing about whether Schwab accepts that request, or
 whether the answer is right.
 
+New or changed HTTP client behavior must reuse ``MockSchwab`` from
+``tests/http_transport.py``. Cover sync and async clients when both expose the
+behavior, and assert the method, URL, headers, serialized body, and relevant
+response or error handling. Tests must never contact Schwab. Pure order-builder
+logic should continue to use ordinary unit tests and does not need a transport
+test.
+
 That distinction has mattered every time. **Every defect found in this library so
 far has been in code with 100% line coverage** — prices silently a cent low, a
 token file a crash could destroy, an enum advertising values the venue rejects,
