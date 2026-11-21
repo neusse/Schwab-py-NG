@@ -1,5 +1,6 @@
 '''Public-client tests that stop at a real ``httpx2`` transport seam.'''
 
+import asyncio
 import json
 
 import pytest
@@ -73,41 +74,43 @@ def test_order_lifecycle_crosses_the_real_oauth_transport():
             == [expected_order, expected_order, expected_order]
 
 
-@pytest.mark.asyncio
-async def test_async_accounts_and_orders_cross_the_real_oauth_transport():
-    schwab = (MockSchwab()
-              .respond_json(200, {
-                  'securitiesAccount': {'accountNumber': 'TEST_ACCOUNT'},
-              })
-              .respond_json(200, {
-                  'orderStrategy': {'status': 'ACCEPTED'},
-              })
-              .respond(201, headers={
-                  'Location':
-                      'https://api.schwabapi.com/trader/v1/accounts/'
-                      'TEST_ACCOUNT_HASH/orders/8001',
-              }))
-    order = equity_buy_limit('MSFT', 1, '500.00')
+def test_async_accounts_and_orders_cross_the_real_oauth_transport():
+    async def run():
+        schwab = (MockSchwab()
+                  .respond_json(200, {
+                      'securitiesAccount': {'accountNumber': 'TEST_ACCOUNT'},
+                  })
+                  .respond_json(200, {
+                      'orderStrategy': {'status': 'ACCEPTED'},
+                  })
+                  .respond(201, headers={
+                      'Location':
+                          'https://api.schwabapi.com/trader/v1/accounts/'
+                          'TEST_ACCOUNT_HASH/orders/8001',
+                  }))
+        order = equity_buy_limit('MSFT', 1, '500.00')
 
-    async with schwab.async_client() as client:
-        account = await client.get_account('TEST_ACCOUNT_HASH')
-        preview = await client.preview_order('TEST_ACCOUNT_HASH', order)
-        placed = await client.place_order('TEST_ACCOUNT_HASH', order)
+        async with schwab.async_client() as client:
+            account = await client.get_account('TEST_ACCOUNT_HASH')
+            preview = await client.preview_order('TEST_ACCOUNT_HASH', order)
+            placed = await client.place_order('TEST_ACCOUNT_HASH', order)
 
-    assert account.json()['securitiesAccount']['accountNumber'] \
-            == 'TEST_ACCOUNT'
-    assert preview.json()['orderStrategy']['status'] == 'ACCEPTED'
-    assert placed.headers['Location'].endswith('/orders/8001')
-    calls = [(request.method, request.url.path)
-             for request in schwab.requests]
-    assert calls == [
-                ('GET', '/trader/v1/accounts/TEST_ACCOUNT_HASH'),
-                ('POST',
-                 '/trader/v1/accounts/TEST_ACCOUNT_HASH/previewOrder'),
-                ('POST', '/trader/v1/accounts/TEST_ACCOUNT_HASH/orders'),
-            ]
-    assert json.loads(schwab.requests[1].content) == order.build()
-    assert json.loads(schwab.requests[2].content) == order.build()
+        assert account.json()['securitiesAccount']['accountNumber'] \
+                == 'TEST_ACCOUNT'
+        assert preview.json()['orderStrategy']['status'] == 'ACCEPTED'
+        assert placed.headers['Location'].endswith('/orders/8001')
+        calls = [(request.method, request.url.path)
+                 for request in schwab.requests]
+        assert calls == [
+                    ('GET', '/trader/v1/accounts/TEST_ACCOUNT_HASH'),
+                    ('POST',
+                     '/trader/v1/accounts/TEST_ACCOUNT_HASH/previewOrder'),
+                    ('POST', '/trader/v1/accounts/TEST_ACCOUNT_HASH/orders'),
+                ]
+        assert json.loads(schwab.requests[1].content) == order.build()
+        assert json.loads(schwab.requests[2].content) == order.build()
+
+    asyncio.run(run())
 
 
 def test_failed_preview_stops_a_real_transport_order_workflow():
