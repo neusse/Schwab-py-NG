@@ -33,6 +33,18 @@ was measured, and every number, is unchanged.
 
 ## Unreleased
 
+### Price-linked trailing-stop-limit contract
+
+The four fixed-price equity trailing-stop-limit templates now emit the
+``priceLinkBasis=MANUAL`` and ``stopType=STANDARD`` fields present in a
+live-previewed accepted request instead of sending a bare fixed ``price`` that
+Schwab rejects. The order-builder guide now documents both fixed-price and
+market-linked limit construction, including the observed basis, link-type,
+offset and preview-response behavior. The live endpoint findings came from
+Alex Golec's upstream
+[`schwab-py` PR #321](https://github.com/alexgolec/schwab-py/pull/321); NG's
+regression tests remain local and send no orders.
+
 ### Explicit full-OAuth token replacement command
 
 The installed ``schwab-fetch-new-token`` command (an ``.exe`` launcher on

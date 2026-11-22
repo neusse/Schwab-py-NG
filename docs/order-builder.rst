@@ -785,11 +785,75 @@ dynamic fashion. The market dimensions that they follow can also be configured
 differently, and it appears that which dimensions are supported varies by order
 type.
 
-We have unfortunately not yet done a thorough analysis of what's supported, nor
-have we made the effort to make it simple and easy. While we're *pretty* sure we
-understand how these fields work, they've been temporarily placed into the
-"undocumented" section, pending a followup. Users are invited to experiment with
-these fields at their own risk.
+The price-link behavior below was established by Alex Golec with live
+``previewOrder`` probes in `schwab-py PR #321
+<https://github.com/alexgolec/schwab-py/pull/321>`__. Thank you to Alex for
+publishing the request shapes, responses and limits. NG's ordinary test suite
+does not contact Schwab; it preserves the locally constructed wire shape while
+this section records what that upstream probe observed. Preview is validation,
+not paper trading, and Schwab can change venue behavior independently of this
+library.
+
+.. _price_linked_trailing_stop_limit:
+
+Price-linked trailing-stop-limit orders
+----------------------------------------
+
+A ``TRAILING_STOP_LIMIT`` order has two independently linked prices:
+
+* ``stopPriceLinkBasis``, ``stopPriceLinkType`` and ``stopPriceOffset`` move
+  the stop condition with a market price.
+* ``priceLinkBasis``, ``priceLinkType`` and ``priceOffset`` derive the limit
+  price submitted when the stop condition is met.
+
+For a market-linked limit, the second trio is all-or-nothing. The observed
+market-data bases were ``LAST``, ``BID``, ``ASK``, ``ASK_BID``, ``MARK`` and
+``AVERAGE``. ``VALUE``, ``PERCENT`` and ``TICK`` were accepted link types, and
+the endpoint accepted positive, negative and zero offsets. It stripped the
+three price-link fields from the successful preview echo, so their absence
+there does not mean the request omitted them.
+
+``MANUAL`` is the fixed-price path: set ``priceLinkBasis`` to ``MANUAL`` and
+set ``price``, without a price link type or offset. ``TRIGGER`` was accepted
+only on children of trigger strategies. ``BASE`` did not derive a usable limit.
+Supplying both a fixed ``price`` and the linked type/offset was rejected.
+Although one Schwab error named other order types, the probes found the linked
+trio usable on ``TRAILING_STOP_LIMIT`` and rejected it on ``MARKET``, ``LIMIT``,
+``TRAILING_STOP``, ``STOP_LIMIT`` and ``LIMIT_ON_CLOSE``.
+
+The four ``equity_*_trailing_stop_limit`` templates use the fixed-price path
+and therefore set ``priceLinkBasis=MANUAL`` for you. To make the limit follow a
+market feed instead, construct the complete order explicitly:
+
+.. code-block:: python
+
+   from schwab.orders.common import (
+       ComplexOrderStrategyType, Duration, EquityInstruction, OrderStrategyType,
+       OrderType, PriceLinkBasis, PriceLinkType, Session, StopPriceLinkBasis,
+       StopPriceLinkType, StopType,
+   )
+   from schwab.orders.generic import OrderBuilder
+
+   order = (
+       OrderBuilder()
+       .set_complex_order_strategy_type(ComplexOrderStrategyType.NONE)
+       .set_order_type(OrderType.TRAILING_STOP_LIMIT)
+       .set_session(Session.NORMAL)
+       .set_stop_type(StopType.STANDARD)
+       .set_stop_price_link_basis(StopPriceLinkBasis.BID)
+       .set_stop_price_link_type(StopPriceLinkType.VALUE)
+       .set_stop_price_offset(5.0)
+       .set_price_link_basis(PriceLinkBasis.LAST)
+       .set_price_link_type(PriceLinkType.VALUE)
+       .set_price_offset(0.10)
+       .set_duration(Duration.DAY)
+       .set_order_strategy_type(OrderStrategyType.SINGLE)
+       .add_equity_leg(EquityInstruction.SELL, 'AAPL', 1)
+   )
+
+``build()`` proves only that this dictionary can be constructed. Use
+``preview_order()`` to ask Schwab whether the current account and venue rules
+accept it, and inspect the response before deciding whether to place it.
 
 
 .. automethod:: schwab.orders.generic.OrderBuilder.set_stop_price
