@@ -1,11 +1,13 @@
 from enum import Enum
 
-from schwab.orders.common import Duration, Session, StopPriceLinkBasis
+from schwab.orders.common import (
+    Duration, PriceLinkBasis, Session, StopPriceLinkBasis, StopType)
 
 
 def _equity_order(instruction, order_type, symbol, quantity, *, price=None,
                   stop_price=None, stop_price_offset=None,
-                  stop_price_link_type=None, stop_price_link_basis=None):
+                  stop_price_link_type=None, stop_price_link_basis=None,
+                  stop_type=None, price_link_basis=None):
     '''
     Builds a single-leg equity order in the normal session, good for the day.
 
@@ -32,6 +34,10 @@ def _equity_order(instruction, order_type, symbol, quantity, *, price=None,
         builder.set_stop_price_link_type(stop_price_link_type)
     if stop_price_link_basis is not None:
         builder.set_stop_price_link_basis(stop_price_link_basis)
+    if stop_type is not None:
+        builder.set_stop_type(stop_type)
+    if price_link_basis is not None:
+        builder.set_price_link_basis(price_link_basis)
 
     return builder
 
@@ -134,7 +140,8 @@ def equity_buy_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwab.orders.generic.OrderBuilder` for an equity
     buy trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit uses Schwab's observed
+    ``priceLinkBasis=MANUAL`` path and ``stopType=STANDARD``.
 
     See :func:`equity_buy_trailing_stop` for a description of the trailing
     parameters.
@@ -145,7 +152,9 @@ def equity_buy_trailing_stop_limit(
             EquityInstruction.BUY, OrderType.TRAILING_STOP_LIMIT, symbol,
             quantity, stop_price_offset=stop_price_offset,
             stop_price_link_type=stop_price_link_type,
-            stop_price_link_basis=stop_price_link_basis, price=price)
+            stop_price_link_basis=stop_price_link_basis,
+            stop_type=StopType.STANDARD,
+            price_link_basis=PriceLinkBasis.MANUAL, price=price)
 
 
 def equity_buy_market_on_close(symbol, quantity):
@@ -267,7 +276,8 @@ def equity_sell_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwab.orders.generic.OrderBuilder` for an equity
     sell trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit uses Schwab's observed
+    ``priceLinkBasis=MANUAL`` path and ``stopType=STANDARD``.
 
     See :func:`equity_sell_trailing_stop` for a description of the trailing
     parameters.
@@ -278,7 +288,9 @@ def equity_sell_trailing_stop_limit(
             EquityInstruction.SELL, OrderType.TRAILING_STOP_LIMIT, symbol,
             quantity, stop_price_offset=stop_price_offset,
             stop_price_link_type=stop_price_link_type,
-            stop_price_link_basis=stop_price_link_basis, price=price)
+            stop_price_link_basis=stop_price_link_basis,
+            stop_type=StopType.STANDARD,
+            price_link_basis=PriceLinkBasis.MANUAL, price=price)
 
 
 def equity_sell_market_on_close(symbol, quantity):
@@ -400,7 +412,8 @@ def equity_sell_short_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwab.orders.generic.OrderBuilder` for an equity
     short sell trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit uses Schwab's observed
+    ``priceLinkBasis=MANUAL`` path and ``stopType=STANDARD``.
 
     See :func:`equity_sell_short_trailing_stop` for a description of the trailing
     parameters.
@@ -411,7 +424,9 @@ def equity_sell_short_trailing_stop_limit(
             EquityInstruction.SELL_SHORT, OrderType.TRAILING_STOP_LIMIT, symbol,
             quantity, stop_price_offset=stop_price_offset,
             stop_price_link_type=stop_price_link_type,
-            stop_price_link_basis=stop_price_link_basis, price=price)
+            stop_price_link_basis=stop_price_link_basis,
+            stop_type=StopType.STANDARD,
+            price_link_basis=PriceLinkBasis.MANUAL, price=price)
 
 
 def equity_sell_short_market_on_close(symbol, quantity):
@@ -534,7 +549,8 @@ def equity_buy_to_cover_trailing_stop_limit(
     '''
     Returns a pre-filled :class:`~schwab.orders.generic.OrderBuilder` for an equity
     buy-to-cover trailing stop-limit order. Places a limit order at ``price`` once the
-    trailing stop condition is met.
+    trailing stop condition is met. The fixed limit uses Schwab's observed
+    ``priceLinkBasis=MANUAL`` path and ``stopType=STANDARD``.
 
     See :func:`equity_buy_to_cover_trailing_stop` for a description of the trailing
     parameters.
@@ -545,7 +561,9 @@ def equity_buy_to_cover_trailing_stop_limit(
             EquityInstruction.BUY_TO_COVER, OrderType.TRAILING_STOP_LIMIT, symbol,
             quantity, stop_price_offset=stop_price_offset,
             stop_price_link_type=stop_price_link_type,
-            stop_price_link_basis=stop_price_link_basis, price=price)
+            stop_price_link_basis=stop_price_link_basis,
+            stop_type=StopType.STANDARD,
+            price_link_basis=PriceLinkBasis.MANUAL, price=price)
 
 
 def equity_buy_to_cover_market_on_close(symbol, quantity):

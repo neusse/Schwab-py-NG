@@ -656,11 +656,24 @@ class OrderBuilder(EnumEnforcer):
     # PriceOffset
     def set_price_offset(self, price_offset):
         '''
-        Set the price offset. Together with
-        :meth:`set_price_link_basis` and :meth:`set_price_link_type`, this
-        expresses a price relative to something else -- for instance the limit
-        price of a child order in a ``TRIGGER`` strategy, set as an offset from
-        the price its parent filled at.
+        Set the numeric offset used to derive a linked limit price. Together
+        with :meth:`set_price_link_basis` and :meth:`set_price_link_type`, this
+        forms the three-field price-link configuration used most notably by
+        ``TRAILING_STOP_LIMIT`` orders.
+
+        Schwab's ``previewOrder`` endpoint has accepted ``LAST``, ``BID``,
+        ``ASK``, ``ASK_BID``, ``MARK`` and ``AVERAGE`` as market-data bases
+        when all three fields are present. ``MANUAL`` selects a fixed
+        :meth:`set_price` instead; ``TRIGGER`` is reserved for child orders of
+        trigger strategies; and ``BASE`` did not derive a usable limit in the
+        observed endpoint behavior. A fixed price and the linked trio are
+        alternatives, not fields to combine.
+
+        The builder validates only that ``price_offset`` is a finite number.
+        Schwab has accepted positive, negative and zero offsets, but venue
+        rules can change and are applied only when an order is previewed or
+        placed. See :ref:`price_linked_trailing_stop_limit` for the observed
+        contract and a complete example.
 
         Note the sibling trio for stop prices already existed
         (:meth:`set_stop_price_link_basis`, :meth:`set_stop_price_link_type`

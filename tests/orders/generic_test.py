@@ -530,15 +530,24 @@ class OrderBuilderTest(unittest.TestCase):
         self.assertFalse(has_diff({}, self.order_builder.build()))
 
     @no_duplicates
+    def test_price_offset_sign_is_not_restricted(self):
+        for offset in (-0.10, 0.0, 0.10):
+            with self.subTest(offset=offset):
+                self.order_builder.set_price_offset(offset)
+                self.assertFalse(has_diff({
+                    'priceOffset': offset
+                }, self.order_builder.build()))
+
+    @no_duplicates
     def test_price_offset_completes_the_price_link_trio(self):
         # The stop-price side already had basis, type and offset. The
         # price-linked side had a basis and a type but no offset, so a
         # price-linked order could not actually be expressed.
-        self.order_builder.set_price_link_basis(PriceLinkBasis.BASE)
+        self.order_builder.set_price_link_basis(PriceLinkBasis.LAST)
         self.order_builder.set_price_link_type(PriceLinkType.VALUE)
         self.order_builder.set_price_offset(1.5)
         self.assertFalse(has_diff({
-            'priceLinkBasis': 'BASE',
+            'priceLinkBasis': 'LAST',
             'priceLinkType': 'VALUE',
             'priceOffset': 1.5,
         }, self.order_builder.build()))
@@ -1393,6 +1402,51 @@ class OrderBuilderExamplesTest(unittest.TestCase):
             'stopPriceLinkBasis': 'BID',
             'stopPriceLinkType': 'VALUE',
             'stopPriceOffset': 10,
+            'duration': 'DAY',
+            'orderStrategyType': 'SINGLE',
+            'orderLegCollection': [
+                {
+                    'instruction': 'SELL',
+                    'quantity': 10,
+                    'instrument': {
+                        'symbol': 'XYZ',
+                        'assetType': 'EQUITY'
+                    }
+                }
+            ]
+        }
+
+        self.assertFalse(has_diff(expected, builder.build()))
+
+    @no_duplicates
+    def test_sell_price_linked_trailing_stop_limit_stock(self):
+        builder = (
+            OrderBuilder()
+            .set_complex_order_strategy_type(ComplexOrderStrategyType.NONE)
+            .set_order_type(OrderType.TRAILING_STOP_LIMIT)
+            .set_session(Session.NORMAL)
+            .set_stop_type(StopType.STANDARD)
+            .set_stop_price_link_basis(StopPriceLinkBasis.BID)
+            .set_stop_price_link_type(StopPriceLinkType.VALUE)
+            .set_stop_price_offset(5.0)
+            .set_price_link_basis(PriceLinkBasis.LAST)
+            .set_price_link_type(PriceLinkType.VALUE)
+            .set_price_offset(0.10)
+            .set_duration(Duration.DAY)
+            .set_order_strategy_type(OrderStrategyType.SINGLE)
+            .add_equity_leg(EquityInstruction.SELL, 'XYZ', 10))
+
+        expected = {
+            'complexOrderStrategyType': 'NONE',
+            'orderType': 'TRAILING_STOP_LIMIT',
+            'session': 'NORMAL',
+            'stopType': 'STANDARD',
+            'stopPriceLinkBasis': 'BID',
+            'stopPriceLinkType': 'VALUE',
+            'stopPriceOffset': 5.0,
+            'priceLinkBasis': 'LAST',
+            'priceLinkType': 'VALUE',
+            'priceOffset': 0.10,
             'duration': 'DAY',
             'orderStrategyType': 'SINGLE',
             'orderLegCollection': [
